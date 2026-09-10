@@ -273,9 +273,23 @@
   // ── 4. 채팅 ──
   const chatMessagesEl = document.getElementById('chat-messages')
   const chatHeroImage = document.getElementById('chat-hero-image')
-  const chatHeroImageWrap = document.getElementById('chat-hero-image-wrap')
   const chatInput = document.getElementById('chat-input')
   const chatSendBtn = document.getElementById('chat-send')
+
+  // AtlasCloud가 "완료" 상태를 반환한 직후에도 실제 파일이 CDN에 아직 다
+  // 준비되지 않아 깨진 이미지로 뜨는 경우가 있었음 — 로드 실패 시 캐시를
+  // 우회해서 잠깐 텀을 두고 재시도한다.
+  function setHeroImage(url, attempt) {
+    attempt = attempt || 0
+    const bust = url + (url.includes('?') ? '&' : '?') + '_retry=' + attempt
+    chatHeroImage.onerror = () => {
+      if (attempt < 5) setTimeout(() => setHeroImage(url, attempt + 1), 2000)
+    }
+    chatHeroImage.onload = () => {
+      chatHeroImage.classList.remove('hidden')
+    }
+    chatHeroImage.src = attempt === 0 ? url : bust
+  }
 
   function appendMessage(role, content) {
     const div = document.createElement('div')
@@ -292,8 +306,7 @@
   async function enterChat(resultUrl) {
     if (resultUrl) {
       localStorage.setItem(RESULT_URL_KEY, resultUrl)
-      chatHeroImage.src = resultUrl
-      chatHeroImageWrap.classList.remove('hidden')
+      setHeroImage(resultUrl)
     }
     showStep('step-chat')
     chatMessagesEl.innerHTML = ''

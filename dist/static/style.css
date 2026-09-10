@@ -159,7 +159,11 @@ body {
   border-radius: 18px;
 }
 
-#chat-hero-image-wrap {
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(6px);
+.hero-image {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 18px;
+  border: 2px solid #fff;
+  box-shadow: 0 4px 16px rgba(232, 85, 133, 0.18);
 }

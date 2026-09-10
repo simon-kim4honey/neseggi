@@ -127,19 +127,15 @@ app.get('/test', (c) => {
         </section>
 
         {/* 4. 채팅 */}
-        <section id="step-chat" class="step step-inner hidden space-y-3 pb-28" data-group="chat">
+        <section id="step-chat" class="step step-inner hidden space-y-3" data-group="chat">
           <div id="chat-messages" class="h-80 overflow-y-auto p-3 space-y-2 text-sm"></div>
+          <img id="chat-hero-image" class="hidden hero-image" />
           <div class="flex gap-2">
             <input id="chat-input" type="text" placeholder="메시지 입력..." class="input-field flex-1" />
             <button id="chat-send" class="btn-primary">보내기</button>
           </div>
           <button id="restart" class="btn-ghost text-xs underline">처음부터 다시 시작</button>
         </section>
-      </div>
-
-      {/* 채팅 화면 하단에 고정으로 떠 있는 합성 이미지 */}
-      <div id="chat-hero-image-wrap" class="hidden fixed bottom-0 left-0 right-0 border-t shadow-lg p-2 flex justify-center z-10">
-        <img id="chat-hero-image" class="photo-preview" style="width:64px;height:64px" />
       </div>
 
       <script src={`/static/test.js?v=${__BUILD_VERSION__}`} defer></script>

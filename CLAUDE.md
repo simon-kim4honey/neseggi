@@ -57,6 +57,42 @@ lookbook-ai와 달리 `src/index.tsx`는 얇게 유지하고, 도메인별로 �
   시크릿은 반드시 Cloudflare 대시보드 → 프로젝트 → Settings → Environment
   variables에서 Preview/Production을 구분해 넣을 것.
 
+## 필요한 시크릿 (Cloudflare Pages 환경변수)
+
+lookbook-ai에서 실제 쓰이는 시크릿 이름 기준 — neseggi도 동일한 이름을 재사용:
+
+- `ATLAS_API_KEY` — AtlasCloud 이미지 생성 (`https://api.atlascloud.ai`)
+- `TOSS_CLIENT_KEY`, `TOSS_SECRET_KEY`, `TOSS_API_BASE` — 토스페이먼츠
+- `ADMIN_PASSWORD` — `/api/admin/*` 인증
+- `KAKAO_CLIENT_ID`, `KAKAO_CLIENT_SECRET`, `KAKAO_JS_KEY` — 카카오 로그인
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — 구글 로그인
+- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` — 해외 결제(선택)
+
+Preview(`develop`)/Production(`main`) 시크릿은 반드시 Cloudflare 대시보드에서
+구분해서 넣을 것(`wrangler pages secret put`은 `--env` 플래그가 버전에 따라
+없어서 실수로 Production에 쓰일 수 있음).
+
+## AtlasCloud 실제 연동 계약 (lookbook-ai 실제 코드 기준)
+
+`src/generation.ts` 구현 시 참고할 정확한 API 형태:
+
+```
+POST https://api.atlascloud.ai/api/v1/model/generateImage
+Headers: Authorization: Bearer {ATLAS_API_KEY}, Content-Type: application/json
+Body: { model, prompt, aspect_ratio, resolution, thinking_level, output_format: 'jpeg', images: string[] }
+→ { code: 200, data: { id: jobId } }
+
+GET https://api.atlascloud.ai/api/v1/model/prediction/{jobId}
+Headers: Authorization: Bearer {ATLAS_API_KEY}
+→ { data: { status: 'completed'|'succeeded'|'failed'|..., outputs/output/images: string[] | string } }
+```
+
+lookbook-ai는 `google/nano-banana-2/edit` 모델을 사용한다. **neseggi가 같은
+모델로 반려동물 합성이 가능한지는 검증되지 않았다** — 실제 계정으로 테스트 먼저
+필요 (아래 "아직 안 한 것" 참고). lookbook-ai는 이 호출을 요청 안에서 동기
+대기(최대 90초)하는 방식으로 쓰고 있지만, neseggi는 문서에서 의도한 대로
+`ctx.executionCtx.waitUntil` + 클라이언트 폴링(202 응답) 방식으로 구현 권장.
+
 ## 아직 안 한 것 (다음 세션)
 
 - Cloudflare Workers/Pages 프로젝트 생성 + D1/KV(스테이징/운영 분리) 실제 생성
@@ -65,7 +101,7 @@ lookbook-ai와 달리 `src/index.tsx`는 얇게 유지하고, 도메인별로 �
 - AI 생성 API(AtlasCloud 등) 계약/키 확인, 반려동물 합성 가능 여부 검증 →
   `src/generation.ts` 실제 구현 + `scripts/verify-critical-prompts.mjs`의
   `GUARDS` 채우기
-- 인증/결제 라우트 실제 구현 (`src/auth.ts`, `src/payments.ts`는 현재 501
-  스텁)
+- 결제 라우트 실제 구현 (`src/payments.ts`는 현재 501 스텁; `src/auth.ts`는
+  이메일 회원가입/로그인/세션/`/me`까지 구현 완료, OAuth만 스텁)
 - `/terms`, `/privacy`, `/refund-policy` — 내새끼 사업자 정보로 실제 내용 작성
   (전자상거래법 제17조 기준 청약철회 조항 포함)

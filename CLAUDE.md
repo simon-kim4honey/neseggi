@@ -41,10 +41,12 @@ lookbook-ai와 달리 `src/index.tsx`는 얇게 유지하고, 도메인별로 �
 
 `/admin`(`admin.ts` API + `public/static/admin.js`)은 관리자 전용 페이지 —
 `X-Admin-Password` 헤더 인증(비밀번호는 페이지에서 입력하면 localStorage에
-저장, 매 요청에 헤더로 붙여 보냄). 지금은 사진 합성 job 목록과 AtlasCloud에
-실제로 전달된 프롬프트 전문(`generation_logs.prompt`, `migrations/0011`)을
-보여주는 용도만 있음 — 프롬프트가 리팩터링 중 조용히 깨지는 사고(아래 경고
-참고)를 코드가 아니라 실제 런타임 값으로 확인할 수 있게 하려는 목적.
+저장, 매 요청에 헤더로 붙여 보냄). 탭 2개: (1) 사진 합성 job 목록 +
+AtlasCloud에 실제로 전달된 프롬프트 전문(`generation_logs.prompt`,
+`migrations/0011`) — 프롬프트가 리팩터링 중 조용히 깨지는 사고(아래 경고
+참고)를 코드가 아니라 실제 런타임 값으로 확인할 수 있게 하려는 목적. (2)
+Claude API 사용자별 사용량/추정 비용(`GET /api/admin/claude-usage`, 아래
+"Claude API 사용량/비용 추적" 참고).
 
 `/test` (`src/index.tsx` + `public/static/test.js`)는 curl 없이 브라우저에서
 전체 흐름(반려동물 프로필 → 보호자 프로필/호칭/사진/배경사진 → 합성 → 채팅)을
@@ -130,6 +132,8 @@ lookbook-ai와 달리 `src/index.tsx`는 얇게 유지하고, 도메인별로 �
   첨부해서 보낸 사진. KV에 원본(data URL)을 영구 저장하고 D1엔 키만 기록
   (pet_photos와 동일 패턴). `GET /pets/:petId/messages/:messageId/image`로
   스트리밍.
+- `claude_usage_logs` (`migrations/0014`) — Claude API 사용량 원장. 아래
+  "Claude API 사용량/비용 추적" 참고.
 
 ## 채팅 속 사진 (2026-09-10 추가)
 
@@ -170,6 +174,25 @@ lookbook-ai와 달리 `src/index.tsx`는 얇게 유지하고, 도메인별로 �
 않고 기존 걸 재사용함.
 아직 별도의 시각적 어드민 페이지는 없음(JSON API만) — 있으면 좋겠으면
 다음 세션에서 요청할 것.
+
+## Claude API 사용량/비용 추적 (2026-09-10 추가)
+
+Claude API가 유료로 과금되고 있어서, `chat.ts`가 `anthropic.messages.create()`를
+호출하는 4곳 전부(`classify-species`, `greeting`, `photo-caption`/
+`daily-memory`가 공유하는 `generatePersonaLine`, 메인 채팅 응답) 응답의
+`response.usage`(input/output/cache_creation/cache_read 토큰)를
+`claude_usage_logs`(`migrations/0014`)에 기록한다 — `logClaudeUsage()`
+헬퍼, 실패해도 채팅 흐름은 막지 않고 로그만 남기고 삼킴. `purpose` 컬럼으로
+호출 용도를 구분한다.
+
+`GET /api/admin/claude-usage`(query: `from`/`to`, `YYYY-MM-DD`)가 사용자별로
+토큰 합계 + 추정 비용(USD)을 계산해서 반환 — `/admin` 페이지의 "Claude API
+사용량" 탭에서 조회 가능. 비용은 `admin.ts`의 `MODEL_PRICING_PER_MTOK`
+단가표(현재 `claude-opus-5` 기준 입력 $5/output $25 per 1M, 캐시 쓰기/읽기는
+입력 단가의 1.25배/0.1배로 환산)로 계산한 **추정치**다 — 실제 Anthropic
+청구서와 소폭 오차가 있을 수 있다. 모델을 바꾸거나 새 모델을 추가하면 이
+단가표도 같이 업데이트할 것(현재 `CHAT_MODEL`은 항상 `claude-opus-5`라
+사실상 한 가지 단가만 쓰임).
 
 ## ⚠️ `c.executionCtx.waitUntil`은 이 Cloudflare Pages 환경에서 신뢰할 수 없다
 

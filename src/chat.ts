@@ -34,6 +34,36 @@ function isDataUrl(v: unknown): v is string {
   return typeof v === 'string' && /^data:image\/(png|jpe?g|webp);base64,/.test(v)
 }
 
+// Claude API 호출마다 실제 토큰 사용량을 기록한다 — 관리자가 사용자별
+// 사용량/비용을 확인할 수 있게 하는 용도(/api/admin/claude-usage). 실패해도
+// 채팅 흐름 자체를 막으면 안 되므로 에러는 로그만 남기고 삼킨다.
+async function logClaudeUsage(
+  db: D1Database,
+  params: { userId: string; petId?: string | null; purpose: string; model: string; usage: Anthropic.Usage }
+): Promise<void> {
+  try {
+    await db
+      .prepare(
+        `INSERT INTO claude_usage_logs
+           (user_id, pet_id, purpose, model, input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        params.userId,
+        params.petId ?? null,
+        params.purpose,
+        params.model,
+        params.usage.input_tokens ?? 0,
+        params.usage.output_tokens ?? 0,
+        (params.usage as any).cache_creation_input_tokens ?? 0,
+        (params.usage as any).cache_read_input_tokens ?? 0
+      )
+      .run()
+  } catch (err) {
+    console.error('claude usage log error:', err)
+  }
+}
+
 // ────────────────────────────────────────────────────
 // ⚠️ 반려동물 페르소나 시스템 프롬프트. 이 서비스의 정서적 핵심 기능이라
 // (세상을 떠난 반려동물과의 대화) 문구를 가볍게 고치지 말 것. 의도적으로
@@ -91,6 +121,7 @@ async function generatePersonaLine(
   anthropic: Anthropic,
   persona: string,
   instruction: string,
+  logCtx: { db: D1Database; userId: string; petId: string; purpose: string },
   maxTokens = 300
 ): Promise<string> {
   const response = await anthropic.messages.create({
@@ -98,6 +129,13 @@ async function generatePersonaLine(
     max_tokens: maxTokens,
     system: persona,
     messages: [{ role: 'user', content: instruction }],
+  })
+  await logClaudeUsage(logCtx.db, {
+    userId: logCtx.userId,
+    petId: logCtx.petId,
+    purpose: logCtx.purpose,
+    model: CHAT_MODEL,
+    usage: response.usage,
   })
   return response.content
     .filter((block): block is Anthropic.TextBlock => block.type === 'text')
@@ -139,6 +177,14 @@ chat.post('/classify-species', async (c) => {
           ],
         },
       ],
+    })
+
+    await logClaudeUsage(db, {
+      userId: (user as any).id,
+      petId: null,
+      purpose: 'classify_species',
+      model: CHAT_MODEL,
+      usage: response.usage,
     })
 
     const species = response.content
@@ -504,6 +550,14 @@ chat.post('/pets/:petId/greeting', async (c) => {
       ],
     })
 
+    await logClaudeUsage(db, {
+      userId: (user as any).id,
+      petId,
+      purpose: 'greeting',
+      model: CHAT_MODEL,
+      usage: response.usage,
+    })
+
     const greetingText = response.content
       .filter((block): block is Anthropic.TextBlock => block.type === 'text')
       .map((block) => block.text)
@@ -562,7 +616,8 @@ chat.post('/pets/:petId/photo-caption', async (c) => {
     const captionText = await generatePersonaLine(
       anthropic,
       persona,
-      '(방금 무지개나라에서 찍힌 사진 한 장을 보호자에게 보여주려는 순간이야. 사진에 정확히 뭐가 나왔는지 설명하지 말고, 사진을 짠 하고 보여주면서 건넬 짧은 한마디만 말해줘 — "어제 꿈에서 나왔던 장면이야", "여기서 이렇게 놀고 있었어" 같이, 무지개나라에서의 한 순간을 사진으로 보여주는 듯한 자연스러운 말투로.)'
+      '(방금 무지개나라에서 찍힌 사진 한 장을 보호자에게 보여주려는 순간이야. 사진에 정확히 뭐가 나왔는지 설명하지 말고, 사진을 짠 하고 보여주면서 건넬 짧은 한마디만 말해줘 — "어제 꿈에서 나왔던 장면이야", "여기서 이렇게 놀고 있었어" 같이, 무지개나라에서의 한 순간을 사진으로 보여주는 듯한 자연스러운 말투로.)',
+      { db, userId: (user as any).id, petId, purpose: 'photo_caption' }
     )
 
     if (!captionText) return c.json({ error: '멘트 생성에 실패했습니다.', code: 'EMPTY_REPLY' }, 502)
@@ -639,7 +694,8 @@ chat.post('/pets/:petId/daily-memory', async (c) => {
         const captionText = await generatePersonaLine(
           anthropic,
           persona,
-          '(오늘 하루에 한 번, 무지개나라에서 문득 찍힌 "오늘의 추억사진" 한 장을 보호자에게 깜짝 보여주는 순간이야. 사진에 정확히 뭐가 나왔는지 설명하지 말고, 오늘 있었던 일이나 기분을 담아 사진을 보여주며 건넬 짧은 한마디만 말해줘 — 무지개나라에서의 오늘 하루를 자연스럽게 나누는 느낌으로.)'
+          '(오늘 하루에 한 번, 무지개나라에서 문득 찍힌 "오늘의 추억사진" 한 장을 보호자에게 깜짝 보여주는 순간이야. 사진에 정확히 뭐가 나왔는지 설명하지 말고, 오늘 있었던 일이나 기분을 담아 사진을 보여주며 건넬 짧은 한마디만 말해줘 — 무지개나라에서의 오늘 하루를 자연스럽게 나누는 느낌으로.)',
+          { db, userId: (user as any).id, petId, purpose: 'daily_memory_caption' }
         )
         if (captionText) {
           await db
@@ -764,6 +820,14 @@ chat.post('/pets/:petId/messages', async (c) => {
         ownerTitle: pet.owner_title,
       }),
       messages: anthropicMessages,
+    })
+
+    await logClaudeUsage(db, {
+      userId: (user as any).id,
+      petId,
+      purpose: 'chat_reply',
+      model: CHAT_MODEL,
+      usage: response.usage,
     })
 
     const replyText = response.content

@@ -271,14 +271,38 @@ app.get('/admin', (c) => {
       </div>
 
       <div id="admin-content" class="hidden space-y-3">
-        <div class="flex justify-between items-center">
-          <h2 class="text-base font-semibold">사진 합성 프롬프트</h2>
+        <div class="flex justify-between items-center gap-2 flex-wrap">
+          <div class="flex gap-2">
+            <button id="admin-tab-generations" class="btn-secondary text-xs">사진 합성 프롬프트</button>
+            <button id="admin-tab-usage" class="btn-secondary text-xs">Claude API 사용량</button>
+          </div>
           <div class="flex gap-2">
             <button id="admin-refresh" class="btn-secondary text-xs">새로고침</button>
             <button id="admin-logout" class="btn-ghost text-xs underline">로그아웃</button>
           </div>
         </div>
-        <div id="admin-list" class="space-y-3"></div>
+
+        {/* 탭 1. 사진 합성 프롬프트 */}
+        <div id="admin-panel-generations" class="space-y-3">
+          <div id="admin-list" class="space-y-3"></div>
+        </div>
+
+        {/* 탭 2. Claude API 사용자별 사용량/추정 비용 — chat.ts의 모든
+            anthropic.messages.create() 호출마다 claude_usage_logs에 남긴
+            토큰 사용량을 사용자별로 합산해서 보여준다(GET /api/admin/claude-usage). */}
+        <div id="admin-panel-usage" class="hidden space-y-3">
+          <div class="flex gap-2 items-center flex-wrap">
+            <label class="text-xs text-gray-500">
+              기간
+              <input id="admin-usage-from" type="date" class="input-field text-xs ml-1" />
+            </label>
+            <span class="text-xs text-gray-400">~</span>
+            <input id="admin-usage-to" type="date" class="input-field text-xs" />
+            <button id="admin-usage-filter" class="btn-secondary text-xs">조회</button>
+          </div>
+          <p id="admin-usage-total" class="text-sm font-semibold"></p>
+          <div id="admin-usage-list" class="space-y-2"></div>
+        </div>
       </div>
 
       <script src={`/static/admin.js?v=${__BUILD_VERSION__}`} defer></script>

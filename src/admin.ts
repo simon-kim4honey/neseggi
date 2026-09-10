@@ -146,4 +146,110 @@ admin.get('/generations/:jobId/image', async (c) => {
   })
 })
 
+// ────────────────────────────────────────────────────
+// GET /api/admin/claude-usage — 사용자별 Claude API 사용량 + 추정 비용(USD).
+// chat.ts의 모든 anthropic.messages.create() 호출마다 claude_usage_logs에
+// 남겨둔 토큰 사용량을 사용자별로 합산한다. 비용은 토큰 단가로 계산한
+// 추정치 — 캐시 쓰기/읽기는 Anthropic 표준 비율(입력 단가의 1.25배/0.1배)로
+// 환산하므로 실제 청구서와 소폭 오차가 있을 수 있다.
+// query: from?, to? (YYYY-MM-DD, created_at 기준 필터, to는 그 날짜까지 포함)
+// ────────────────────────────────────────────────────
+const MODEL_PRICING_PER_MTOK: Record<string, { input: number; output: number }> = {
+  'claude-opus-5': { input: 5, output: 25 },
+  'claude-sonnet-5': { input: 2, output: 10 },
+  'claude-haiku-4-5': { input: 1, output: 5 },
+}
+const DEFAULT_PRICING = MODEL_PRICING_PER_MTOK['claude-opus-5'] // 모르는 모델이면 가장 비싼 단가로 보수적으로 추정
+
+function estimateCostUsd(row: {
+  model: string
+  input_tokens: number
+  output_tokens: number
+  cache_creation_input_tokens: number
+  cache_read_input_tokens: number
+}): number {
+  const pricing = MODEL_PRICING_PER_MTOK[row.model] ?? DEFAULT_PRICING
+  const inputCost = (row.input_tokens / 1_000_000) * pricing.input
+  const outputCost = (row.output_tokens / 1_000_000) * pricing.output
+  const cacheWriteCost = (row.cache_creation_input_tokens / 1_000_000) * pricing.input * 1.25
+  const cacheReadCost = (row.cache_read_input_tokens / 1_000_000) * pricing.input * 0.1
+  return inputCost + outputCost + cacheWriteCost + cacheReadCost
+}
+
+admin.get('/claude-usage', async (c) => {
+  const db = c.env.NESEGGI_DB
+  const from = c.req.query('from')
+  const to = c.req.query('to')
+
+  const conditions: string[] = []
+  const params: any[] = []
+  if (from) {
+    conditions.push('l.created_at >= ?')
+    params.push(from)
+  }
+  if (to) {
+    conditions.push(`l.created_at < date(?, '+1 day')`)
+    params.push(to)
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  const { results } = await db
+    .prepare(
+      `SELECT l.user_id, u.email AS user_email, u.name AS user_name, l.model, l.purpose,
+              SUM(l.input_tokens) AS input_tokens,
+              SUM(l.output_tokens) AS output_tokens,
+              SUM(l.cache_creation_input_tokens) AS cache_creation_input_tokens,
+              SUM(l.cache_read_input_tokens) AS cache_read_input_tokens,
+              COUNT(*) AS call_count
+       FROM claude_usage_logs l
+       LEFT JOIN users u ON u.id = l.user_id
+       ${where}
+       GROUP BY l.user_id, l.model, l.purpose
+       ORDER BY l.user_id`
+    )
+    .bind(...params)
+    .all()
+
+  const byUser = new Map<string, any>()
+  for (const row of (results ?? []) as any[]) {
+    const cost = estimateCostUsd(row)
+    if (!byUser.has(row.user_id)) {
+      byUser.set(row.user_id, {
+        userId: row.user_id,
+        userEmail: row.user_email,
+        userName: row.user_name,
+        callCount: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        estimatedCostUsd: 0,
+        byPurpose: [] as any[],
+      })
+    }
+    const entry = byUser.get(row.user_id)
+    entry.callCount += row.call_count
+    entry.inputTokens += row.input_tokens
+    entry.outputTokens += row.output_tokens
+    entry.cacheCreationInputTokens += row.cache_creation_input_tokens
+    entry.cacheReadInputTokens += row.cache_read_input_tokens
+    entry.estimatedCostUsd += cost
+    entry.byPurpose.push({
+      model: row.model,
+      purpose: row.purpose,
+      callCount: row.call_count,
+      inputTokens: row.input_tokens,
+      outputTokens: row.output_tokens,
+      cacheCreationInputTokens: row.cache_creation_input_tokens,
+      cacheReadInputTokens: row.cache_read_input_tokens,
+      estimatedCostUsd: cost,
+    })
+  }
+
+  const users = Array.from(byUser.values()).sort((a, b) => b.estimatedCostUsd - a.estimatedCostUsd)
+  const totalCostUsd = users.reduce((sum, u) => sum + u.estimatedCostUsd, 0)
+
+  return c.json({ users, totalCostUsd })
+})
+
 export { admin }

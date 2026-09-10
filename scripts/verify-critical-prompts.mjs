@@ -24,10 +24,20 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const srcPath = join(__dirname, '..', 'src', 'generation.ts')
 const src = readFileSync(srcPath, 'utf8')
 
-// TODO(neseggi): 실제 생성 프롬프트를 작성하면 여기에 핵심 문구를 등록할 것.
-// 형식은 lookbook-ai/scripts/verify-critical-prompts.mjs 참고:
-// { name: '...', must: '반드시 남아있어야 하는 문구', why: '왜 중요한지' }
-const GUARDS = []
+const GUARDS = [
+  {
+    name: '반려동물 생김새 보존 지시문',
+    must:
+      'ABSOLUTE RULE — NEVER VIOLATE: the pet in the output must be the exact same animal as shown in Image 1 — identical breed, fur color, fur pattern and markings, ear shape, face, and eye color.',
+    why: '이 문구가 사라지거나 약해지면 사용자가 보낸 반려동물과 다르게 생긴 "일반적인 동물"이 나와도 빌드/배포/로그 어디에도 안 남고 사용자 리포트로만 발견된다.',
+  },
+  {
+    name: '보호자 얼굴 보존 지시문',
+    must:
+      "ABSOLUTE RULE — NEVER VIOLATE: the person in the output must be the exact same person as shown in Image 2 — identical face, facial features, hair, and skin tone.",
+    why: '보호자 사진이 포함된 합성에서 이 문구가 사라지면 실제 보호자와 다른 사람 얼굴이 나올 수 있다.',
+  },
+]
 
 let failed = false
 for (const g of GUARDS) {

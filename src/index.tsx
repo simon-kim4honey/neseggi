@@ -14,6 +14,7 @@ type Bindings = {
   KAKAO_CLIENT_SECRET: string
   GOOGLE_CLIENT_ID: string
   GOOGLE_CLIENT_SECRET: string
+  ATLAS_API_KEY: string
 }
 
 const app = new Hono<{ Bindings: Bindings }>()

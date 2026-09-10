@@ -64,6 +64,11 @@ const GUARDS = [
     must: 'render the background\'s furniture and room proportions at a scale and perspective that naturally fits around the subjects',
     why: '2026-09-11 실사진 테스트에서, 인물 크기를 원본 그대로 고정하기만 하고 배경 비율은 안 맞춰서 소파/테이블 같은 가구가 인물과 어색하게 따로 노는(비율이 안 맞는) 합성 결과가 나옴 — 배경이 인물/동물 크기에 맞춰 조정되어야 한다는 방향을 명시.',
   },
+  {
+    name: '생김새(얼굴·무늬)만 고정하고 포즈·조명은 새 장면에 맞게 재생성 (누끼 방지)',
+    must: 'must be freely and fully regenerated to naturally fit the new scene. Never simply paste',
+    why: '2026-09-11 사용자 피드백: "사람, 동물들도 생김새는 유지하되 동작은 자연스럽게 생성해줘라... 지금은 그냥 누끼딴 이미지잖아" — 생김새 보존 지시문이 너무 강하게 "정확히 그대로 재현"만 강조하면 모델이 안전하게 포즈/조명까지 원본 그대로 복사해버려서 배경에 붙여넣은 듯한(누끼) 부자연스러운 결과가 나온다. 이 문구가 사라지면 같은 문제가 재발할 수 있다.',
+  },
 ]
 
 let failed = false

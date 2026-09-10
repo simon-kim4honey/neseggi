@@ -431,10 +431,21 @@
 
   // 사진 합성이 끝나면 반려동물 메시지로 썸네일을 보낸다 — 클릭하면 큰
   // 이미지로 볼 수 있다.
+  //
+  // ⚠️ width:30%를 CSS로만 주면 안 된다 — 이 썸네일은 flex-basis가 auto인
+  // flex item(col) 안에 들어있어서, col 자체의 너비가 "내용 기준"으로
+  // 정해지는 상태에서 이미지가 아직 로드되기 전이면 퍼센트 너비를 해석할
+  // 기준(정해진 너비)이 없다. 그러면 브라우저가 깨진 이미지 아이콘의 아주
+  // 작은 고유 크기를 기준으로 col 너비를 계산해버려서, 썸네일이 세로로 한
+  // 글자씩 줄바꿈되는 기형적인 크기로 보이고, 재시도할 때마다 크기가
+  // 요동쳐 깜빡이는 것처럼 보인다(2026-09-10). 채팅창 자체의 실제 픽셀
+  // 너비를 JS로 계산해서 고정 px로 지정하면 이 순환 참조가 생기지 않는다.
   function appendPetImageMessage(url) {
     const thumb = document.createElement('img')
     thumb.className = 'chat-thumb'
     thumb.alt = '생성된 사진'
+    const thumbWidthPx = Math.max(72, Math.round(chatMessagesEl.clientWidth * 0.3))
+    thumb.style.width = thumbWidthPx + 'px'
     thumb.addEventListener('click', () => openLightbox(url))
     chatMessagesEl.appendChild(makePetMessageRow(thumb))
     chatScrollEl.scrollTop = chatScrollEl.scrollHeight
@@ -442,6 +453,7 @@
     setImageWithRetry(thumb, url, 0, () => {
       const fallback = document.createElement('div')
       fallback.className = 'chat-thumb chat-thumb-fallback'
+      fallback.style.width = thumbWidthPx + 'px'
       fallback.textContent = '🐾'
       fallback.title = '사진을 불러오지 못했어요'
       thumb.replaceWith(fallback)

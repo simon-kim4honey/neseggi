@@ -237,6 +237,31 @@ chat.get('/pets', async (c) => {
 })
 
 // ────────────────────────────────────────────────────
+// GET /api/chat/photo-album — 로그인한 사용자의 사진첩. 완료된 사진 합성
+// job(수동 합성 + "오늘의 추억사진" 전부)을 최신순으로 보여준다. 각 항목은
+// avatar-proxy?jobId=...로 그 job의 결과 이미지를 그대로 보여줄 수 있다.
+// ────────────────────────────────────────────────────
+chat.get('/photo-album', async (c) => {
+  const db = c.env.NESEGGI_DB
+  const token = c.req.header('X-Session-Token')
+  const user = await getSessionUser(db, token)
+  if (!user) return c.json({ error: '로그인이 필요합니다.', code: 'UNAUTHORIZED' }, 401)
+
+  const { results } = await db
+    .prepare(
+      `SELECT g.id, g.pet_id, g.concept, g.source, g.created_at, p.name AS pet_name
+       FROM generation_logs g
+       LEFT JOIN pets p ON p.id = g.pet_id
+       WHERE g.user_id = ? AND g.status = 'done'
+       ORDER BY g.created_at DESC`
+    )
+    .bind((user as any).id)
+    .all()
+
+  return c.json({ photos: results ?? [] })
+})
+
+// ────────────────────────────────────────────────────
 // POST /api/chat/pets/:petId/photos — 반려동물 참고 사진 풀에 사진 추가
 // (최대 10장). body: { images: dataUrl[] }. 여기 쌓인 사진들이 사진 합성
 // (POST /api/generate/start)과 "오늘의 추억사진"(daily-memory) 둘 다의

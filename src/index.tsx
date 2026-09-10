@@ -167,7 +167,23 @@ app.get('/test', (c) => {
             <input id="chat-input" type="text" placeholder="메시지 입력..." class="input-field flex-1" />
             <button id="chat-send" class="btn-primary">보내기</button>
           </div>
-          <button id="restart" class="btn-ghost text-xs underline">처음부터 다시 시작</button>
+          <div class="flex justify-between items-center">
+            <button id="open-photo-album" class="btn-ghost text-xs underline">사진첩 보기</button>
+            <button id="restart" class="btn-ghost text-xs underline">처음부터 다시 시작</button>
+          </div>
+        </section>
+
+        {/* 5. 사진첩 — 이 사용자가 지금까지 생성한 사진 전체(수동 합성 +
+            오늘의 추억사진)를 최신순으로 보여준다 */}
+        <section id="step-photo-album" class="step step-inner hidden space-y-3" data-group="chat">
+          <div class="flex justify-between items-center">
+            <h2 class="text-lg font-bold">사진첩 📷</h2>
+            <button id="photo-album-back" class="btn-ghost text-xs underline">채팅으로 돌아가기</button>
+          </div>
+          <div id="photo-album-grid" class="grid grid-cols-3 gap-2"></div>
+          <p id="photo-album-empty" class="hidden text-sm text-gray-400 text-center py-8">
+            아직 생성된 사진이 없어요.
+          </p>
         </section>
       </div>
 

@@ -257,7 +257,16 @@
   document.getElementById('login-google').addEventListener('click', () => loginWithOAuth('google'))
 
   // ── 단계 전환 ──
-  const steps = ['step-login', 'step-pet', 'step-title', 'step-owner-photo', 'step-bg-photo', 'step-generating', 'step-chat']
+  const steps = [
+    'step-login',
+    'step-pet',
+    'step-title',
+    'step-owner-photo',
+    'step-bg-photo',
+    'step-generating',
+    'step-chat',
+    'step-photo-album',
+  ]
   const progressDots = Array.from(document.querySelectorAll('#progress-dots span'))
   function showStep(id) {
     steps.forEach((s) => document.getElementById(s).classList.toggle('hidden', s !== id))
@@ -740,6 +749,35 @@
     localStorage.removeItem(RESULT_URL_KEY)
     location.reload()
   })
+
+  // ── 5. 사진첩 — 지금까지 생성한 사진 전체(수동 합성 + 오늘의 추억사진)를
+  // 최신순으로 보여준다. 진행 중인 채팅 상태는 그대로 두고 화면만 전환한다.
+  const photoAlbumGrid = document.getElementById('photo-album-grid')
+  const photoAlbumEmpty = document.getElementById('photo-album-empty')
+
+  document.getElementById('open-photo-album').addEventListener('click', async () => {
+    showStep('step-photo-album')
+    photoAlbumGrid.innerHTML = ''
+    photoAlbumEmpty.classList.add('hidden')
+
+    const { ok, data } = await api('/api/chat/photo-album')
+    const photos = ok ? data.photos || [] : []
+    if (photos.length === 0) {
+      photoAlbumEmpty.classList.remove('hidden')
+      return
+    }
+    photos.forEach((p) => {
+      const proxiedUrl = avatarProxyUrl(p.pet_id, p.id)
+      const img = document.createElement('img')
+      img.className = 'w-full aspect-square object-cover rounded-lg border cursor-pointer'
+      img.alt = p.pet_name || '생성된 사진'
+      img.addEventListener('click', () => openLightbox(proxiedUrl))
+      photoAlbumGrid.appendChild(img)
+      setImageWithRetry(img, proxiedUrl, 0, () => img.remove())
+    })
+  })
+
+  document.getElementById('photo-album-back').addEventListener('click', () => showStep('step-chat'))
 
   // ── 시작 ──
   ;(async function init() {

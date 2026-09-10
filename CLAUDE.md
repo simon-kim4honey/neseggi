@@ -141,6 +141,15 @@ lookbook-ai와 달리 `src/index.tsx`는 얇게 유지하고, 도메인별로 �
 어드민 전용 조회: `GET /api/admin/users/:userId/pets`(사진 풀 장수 포함),
 `GET /api/admin/pets/:petId/photos`(목록), `GET /api/admin/pets/:petId/photos/:photoId/image`
 (실제 이미지, KV에서 디코딩해서 스트리밍) — `X-Admin-Password` 헤더 필요.
+
+## 사진첩 (2026-09-10 추가)
+
+`GET /api/chat/photo-album` — 로그인한 사용자가 지금까지 생성한 사진 전체
+(수동 합성 + 오늘의 추억사진, `status='done'`인 `generation_logs`를
+`user_id` 기준으로 전부)를 최신순으로 반환. `/test`의 채팅 화면에서 "사진첩
+보기" 버튼(`step-photo-album`)으로 그리드로 보여주고, 각 항목은 avatar-proxy
+(`/pets/:petId/avatar-proxy?jobId=...`)로 렌더링 — 새 프록시를 따로 만들지
+않고 기존 걸 재사용함.
 아직 별도의 시각적 어드민 페이지는 없음(JSON API만) — 있으면 좋겠으면
 다음 세션에서 요청할 것.
 

@@ -40,23 +40,26 @@
   }
 
   // 파일 선택 즉시 썸네일 미리보기 — 업로드(=파일 선택)가 제대로 됐는지 눈으로 확인용
-  function wirePreview(inputId, previewId) {
+  function wirePreview(inputId, previewId, labelId) {
     const input = document.getElementById(inputId)
     const preview = document.getElementById(previewId)
+    const label = labelId ? document.getElementById(labelId) : null
     input.addEventListener('change', () => {
       const file = input.files[0]
       if (!file) {
         preview.classList.add('hidden')
         preview.src = ''
+        if (label) label.classList.remove('hidden')
         return
       }
       preview.src = URL.createObjectURL(file)
       preview.classList.remove('hidden')
+      if (label) label.classList.add('hidden')
     })
   }
-  wirePreview('pet-photo', 'pet-photo-preview')
-  wirePreview('owner-photo', 'owner-photo-preview')
-  wirePreview('bg-photo', 'bg-photo-preview')
+  wirePreview('pet-photo', 'pet-photo-preview', 'pet-photo-label')
+  wirePreview('owner-photo', 'owner-photo-preview', 'owner-photo-label')
+  wirePreview('bg-photo', 'bg-photo-preview', 'bg-photo-label')
 
   function randomHex(len) {
     const bytes = new Uint8Array(len)
@@ -88,8 +91,11 @@
 
   // ── 단계 전환 ──
   const steps = ['step-pet', 'step-title', 'step-owner-photo', 'step-bg-photo', 'step-generating', 'step-chat']
+  const progressDots = Array.from(document.querySelectorAll('#progress-dots span'))
   function showStep(id) {
     steps.forEach((s) => document.getElementById(s).classList.toggle('hidden', s !== id))
+    const activeGroup = document.getElementById(id).dataset.group
+    progressDots.forEach((dot) => dot.classList.toggle('active', dot.dataset.group === activeGroup))
   }
 
   // ── 1. 반려동물 프로필 ──
@@ -130,18 +136,18 @@
     const btn = document.createElement('button')
     btn.textContent = t
     btn.type = 'button'
-    btn.className = 'border rounded-full px-4 py-2 text-sm'
+    btn.className = 'title-chip'
     btn.addEventListener('click', () => {
       selectedTitle = t
       document.getElementById('title-custom').value = ''
-      Array.from(titleOptionsEl.children).forEach((el) => el.classList.remove('bg-pink-500', 'text-white'))
-      btn.classList.add('bg-pink-500', 'text-white')
+      Array.from(titleOptionsEl.children).forEach((el) => el.classList.remove('selected'))
+      btn.classList.add('selected')
     })
     titleOptionsEl.appendChild(btn)
   })
   document.getElementById('title-custom').addEventListener('input', () => {
     selectedTitle = null
-    Array.from(titleOptionsEl.children).forEach((el) => el.classList.remove('bg-pink-500', 'text-white'))
+    Array.from(titleOptionsEl.children).forEach((el) => el.classList.remove('selected'))
   })
 
   document.getElementById('step-title-back').addEventListener('click', () => showStep('step-pet'))
@@ -246,9 +252,7 @@
     const isPet = role === 'pet'
     div.className = isPet ? 'text-left' : 'text-right'
     const bubble = document.createElement('span')
-    bubble.className = isPet
-      ? 'inline-block bg-white border rounded-lg px-3 py-2 max-w-[80%]'
-      : 'inline-block bg-pink-500 text-white rounded-lg px-3 py-2 max-w-[80%]'
+    bubble.className = (isPet ? 'bubble-pet' : 'bubble-user') + ' inline-block max-w-[80%]'
     bubble.textContent = content
     div.appendChild(bubble)
     chatMessagesEl.appendChild(div)

@@ -48,84 +48,98 @@ app.get('/', (c) => {
 app.get('/test', (c) => {
   return c.render(
     <>
-      <div id="test-app" class="max-w-md mx-auto p-4 pb-10">
+      <div id="test-app" class="max-w-md mx-auto">
+        <div id="progress-dots">
+          <span data-group="pet"></span>
+          <span data-group="owner"></span>
+          <span data-group="gen"></span>
+          <span data-group="chat"></span>
+        </div>
+
         {/* 1. 우리 아이 프로필 */}
-        <section id="step-pet" class="step space-y-3">
-          <h2 class="text-lg font-bold">우리 아이 프로필</h2>
-          <label class="block text-sm text-gray-500">
-            반려동물 사진
-            <input id="pet-photo" type="file" accept="image/*" class="block w-full mt-1" />
+        <section id="step-pet" class="step step-inner space-y-3" data-group="pet">
+          <h2 class="text-lg font-bold">우리 아이 프로필 🐾</h2>
+          <label for="pet-photo" class="photo-drop block">
+            <img id="pet-photo-preview" class="hidden photo-preview mx-auto mb-2" />
+            <span id="pet-photo-label">반려동물 사진을 올려주세요</span>
           </label>
-          <img id="pet-photo-preview" class="hidden w-24 h-24 object-cover rounded-lg border" />
-          <input id="pet-name" type="text" placeholder="이름 (예: 콩이)" class="w-full border rounded px-3 py-2" />
-          <input id="pet-species" type="text" placeholder="종 (예: 강아지)" class="w-full border rounded px-3 py-2" />
-          <input id="pet-personality" type="text" placeholder="성격/말투" class="w-full border rounded px-3 py-2" />
-          <div class="flex justify-end">
-            <button id="step-pet-next" class="bg-pink-500 text-white rounded px-4 py-2">다음단계</button>
+          <input id="pet-photo" type="file" accept="image/*" class="hidden" />
+          <input id="pet-name" type="text" placeholder="이름 (예: 콩이)" class="input-field" />
+          <input id="pet-species" type="text" placeholder="종 (예: 강아지)" class="input-field" />
+          <input id="pet-personality" type="text" placeholder="성격/말투" class="input-field" />
+          <div class="flex justify-end pt-1">
+            <button id="step-pet-next" class="btn-primary">다음단계</button>
           </div>
         </section>
 
         {/* 2. 보호자 프로필 — 호칭 */}
-        <section id="step-title" class="step hidden space-y-3">
+        <section id="step-title" class="step step-inner hidden space-y-3" data-group="owner">
           <h2 class="text-lg font-bold">저를 뭐라고 부를까요?</h2>
           <div id="title-options" class="flex flex-wrap gap-2"></div>
-          <input id="title-custom" type="text" placeholder="직접 입력 (예: 지수)" class="w-full border rounded px-3 py-2" />
+          <input id="title-custom" type="text" placeholder="직접 입력 (예: 지수)" class="input-field" />
           <div class="flex justify-between pt-2">
-            <button id="step-title-back" class="text-gray-500">이전단계</button>
-            <button id="step-title-next" class="bg-pink-500 text-white rounded px-4 py-2">다음단계</button>
+            <button id="step-title-back" class="btn-ghost">이전단계</button>
+            <button id="step-title-next" class="btn-primary">다음단계</button>
           </div>
         </section>
 
         {/* 2. 보호자 프로필 — 보호자 사진 */}
-        <section id="step-owner-photo" class="step hidden space-y-3">
+        <section id="step-owner-photo" class="step step-inner hidden space-y-3" data-group="owner">
           <h2 class="text-lg font-bold">보호자 사진을 넣어주세요</h2>
           <p class="text-sm text-gray-500">우리 아이와 함께 있는 사진이 생겨요</p>
-          <input id="owner-photo" type="file" accept="image/*" class="block w-full" />
-          <img id="owner-photo-preview" class="hidden w-24 h-24 object-cover rounded-lg border" />
+          <label for="owner-photo" class="photo-drop block">
+            <img id="owner-photo-preview" class="hidden photo-preview mx-auto mb-2" />
+            <span id="owner-photo-label">사진 선택하기</span>
+          </label>
+          <input id="owner-photo" type="file" accept="image/*" class="hidden" />
           <div class="flex justify-between pt-2">
-            <button id="step-owner-photo-back" class="text-gray-500">이전단계</button>
+            <button id="step-owner-photo-back" class="btn-ghost">이전단계</button>
             <div class="flex gap-2">
-              <button id="step-owner-photo-skip" class="border rounded px-3 py-2 text-sm">넣지 않아도 괜찮아요</button>
-              <button id="step-owner-photo-next" class="bg-pink-500 text-white rounded px-4 py-2">다음단계</button>
+              <button id="step-owner-photo-skip" class="btn-secondary">넣지 않아도 괜찮아요</button>
+              <button id="step-owner-photo-next" class="btn-primary">다음단계</button>
             </div>
           </div>
         </section>
 
         {/* 2. 보호자 프로필 — 배경 사진 */}
-        <section id="step-bg-photo" class="step hidden space-y-3">
+        <section id="step-bg-photo" class="step step-inner hidden space-y-3" data-group="owner">
           <h2 class="text-lg font-bold">우리집 또는 자주 가는 장소를 올려주세요</h2>
           <p class="text-sm text-gray-500">우리 아이가 그곳에 있는 사진이 생겨요</p>
-          <input id="bg-photo" type="file" accept="image/*" class="block w-full" />
-          <img id="bg-photo-preview" class="hidden w-24 h-24 object-cover rounded-lg border" />
+          <label for="bg-photo" class="photo-drop block">
+            <img id="bg-photo-preview" class="hidden photo-preview mx-auto mb-2" />
+            <span id="bg-photo-label">사진 선택하기</span>
+          </label>
+          <input id="bg-photo" type="file" accept="image/*" class="hidden" />
           <div class="flex justify-between pt-2">
-            <button id="step-bg-photo-back" class="text-gray-500">이전단계</button>
+            <button id="step-bg-photo-back" class="btn-ghost">이전단계</button>
             <div class="flex gap-2">
-              <button id="step-bg-photo-skip" class="border rounded px-3 py-2 text-sm">넣지 않아도 괜찮아요</button>
-              <button id="step-bg-photo-next" class="bg-pink-500 text-white rounded px-4 py-2">다음단계</button>
+              <button id="step-bg-photo-skip" class="btn-secondary">넣지 않아도 괜찮아요</button>
+              <button id="step-bg-photo-next" class="btn-primary">다음단계</button>
             </div>
           </div>
         </section>
 
         {/* 3. 사진 합성 진행 중 */}
-        <section id="step-generating" class="step hidden text-center space-y-3 py-16">
-          <p class="text-lg">무지개 나라에서 우리 아이를 부르고 있어요..</p>
-          <p id="gen-status-text" class="text-sm text-gray-500"></p>
+        <section id="step-generating" class="step step-inner hidden text-center space-y-3 py-16" data-group="gen">
+          <div class="loading-paw">🐾</div>
+          <p class="text-lg font-medium">무지개 나라에서 우리 아이를 부르고 있어요..</p>
+          <p id="gen-status-text" class="text-sm text-gray-400"></p>
         </section>
 
         {/* 4. 채팅 */}
-        <section id="step-chat" class="step hidden space-y-3 pb-28">
-          <div id="chat-messages" class="h-80 overflow-y-auto bg-gray-50 rounded p-3 space-y-2 text-sm"></div>
+        <section id="step-chat" class="step step-inner hidden space-y-3 pb-28" data-group="chat">
+          <div id="chat-messages" class="h-80 overflow-y-auto p-3 space-y-2 text-sm"></div>
           <div class="flex gap-2">
-            <input id="chat-input" type="text" placeholder="메시지 입력..." class="flex-1 border rounded px-3 py-2" />
-            <button id="chat-send" class="bg-pink-500 text-white rounded px-4 py-2">보내기</button>
+            <input id="chat-input" type="text" placeholder="메시지 입력..." class="input-field flex-1" />
+            <button id="chat-send" class="btn-primary">보내기</button>
           </div>
-          <button id="restart" class="text-xs text-gray-400 underline">처음부터 다시 시작</button>
+          <button id="restart" class="btn-ghost text-xs underline">처음부터 다시 시작</button>
         </section>
       </div>
 
       {/* 채팅 화면 하단에 고정으로 떠 있는 합성 이미지 */}
-      <div id="chat-hero-image-wrap" class="hidden fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-2 flex justify-center z-10">
-        <img id="chat-hero-image" class="w-20 h-20 object-cover rounded-xl border" />
+      <div id="chat-hero-image-wrap" class="hidden fixed bottom-0 left-0 right-0 border-t shadow-lg p-2 flex justify-center z-10">
+        <img id="chat-hero-image" class="photo-preview" style="width:64px;height:64px" />
       </div>
 
       <script src={`/static/test.js?v=${__BUILD_VERSION__}`} defer></script>

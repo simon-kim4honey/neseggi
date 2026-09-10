@@ -64,8 +64,8 @@ app.get('/test', (c) => {
             <span id="pet-photo-label">반려동물 사진을 올려주세요</span>
           </label>
           <input id="pet-photo" type="file" accept="image/*" class="hidden" />
+          <p id="pet-species-hint" class="text-xs text-gray-400 -mt-1"></p>
           <input id="pet-name" type="text" placeholder="이름 (예: 콩이)" class="input-field" />
-          <input id="pet-species" type="text" placeholder="종 (예: 강아지)" class="input-field" />
           <input id="pet-personality" type="text" placeholder="성격/말투" class="input-field" />
           <div class="flex justify-end pt-1">
             <button id="step-pet-next" class="btn-primary">다음단계</button>

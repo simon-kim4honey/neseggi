@@ -16,6 +16,12 @@ function newPetId(): string {
   return `p_${crypto.randomUUID().replace(/-/g, '')}`
 }
 
+function parseDataUrl(dataUrl: string): { mediaType: string; base64: string } | null {
+  const match = /^data:(image\/(?:png|jpe?g|webp));base64,(.+)$/.exec(dataUrl)
+  if (!match) return null
+  return { mediaType: match[1], base64: match[2] }
+}
+
 // ────────────────────────────────────────────────────
 // ⚠️ 반려동물 페르소나 시스템 프롬프트. 이 서비스의 정서적 핵심 기능이라
 // (세상을 떠난 반려동물과의 대화) 문구를 가볍게 고치지 말 것. 의도적으로
@@ -50,6 +56,55 @@ function buildPersonaSystemPrompt(pet: {
     .filter(Boolean)
     .join(' ')
 }
+
+// ────────────────────────────────────────────────────
+// POST /api/chat/classify-species — 반려동물 사진을 보고 종/품종 자동 분류
+// body: { image: dataUrl } → { species: string }
+// 사용자가 직접 "종" 입력하는 대신 사진으로 자동 추정한다.
+// ────────────────────────────────────────────────────
+chat.post('/classify-species', async (c) => {
+  try {
+    const db = c.env.NESEGGI_DB
+    const token = c.req.header('X-Session-Token')
+    const user = await getSessionUser(db, token)
+    if (!user) return c.json({ error: '로그인이 필요합니다.', code: 'UNAUTHORIZED' }, 401)
+
+    const body = await c.req.json().catch(() => null)
+    const image = typeof body?.image === 'string' ? body.image : ''
+    const parsed = parseDataUrl(image)
+    if (!parsed) return c.json({ error: '이미지가 필요합니다.', code: 'IMAGE_REQUIRED' }, 400)
+
+    const anthropic = new Anthropic({ apiKey: c.env.ANTHROPIC_API_KEY })
+    const response = await anthropic.messages.create({
+      model: CHAT_MODEL,
+      max_tokens: 32,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: parsed.mediaType as any, data: parsed.base64 } },
+            {
+              type: 'text',
+              text: '이 사진 속 동물의 종/품종을 한국어로 아주 짧게 답해줘 (예: 말티즈, 코리안숏헤어, 햄스터, 진돗개). 동물이 여러 마리거나 뭔지 확실하지 않으면 "반려동물"이라고만 답해. 다른 설명 없이 종/품종 이름만 답해.',
+            },
+          ],
+        },
+      ],
+    })
+
+    const species = response.content
+      .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+      .map((block) => block.text)
+      .join(' ')
+      .trim()
+      .slice(0, 20)
+
+    return c.json({ species: species || '반려동물' })
+  } catch (err: any) {
+    console.error('classify-species error:', err)
+    return c.json({ error: '서버 오류가 발생했습니다.', code: 'INTERNAL_ERROR', message: err?.message }, 500)
+  }
+})
 
 // ────────────────────────────────────────────────────
 // POST /api/chat/pets — 반려동물 프로필 생성 (또는 업데이트)

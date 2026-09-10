@@ -57,9 +57,40 @@
       if (label) label.classList.add('hidden')
     })
   }
-  wirePreview('pet-photo', 'pet-photo-preview', 'pet-photo-label')
   wirePreview('owner-photo', 'owner-photo-preview', 'owner-photo-label')
   wirePreview('bg-photo', 'bg-photo-preview', 'bg-photo-label')
+
+  // 반려동물 사진은 미리보기와 동시에 종/품종을 사진으로 자동 분류한다(사용자
+  // 직접 입력 없음). 선택 즉시 백그라운드로 분류 요청을 보내고, "다음단계"를
+  // 누를 때 아직 안 끝났으면 그때 기다린다.
+  let speciesPromise = null
+  const petPhotoPreview = document.getElementById('pet-photo-preview')
+  const petPhotoLabel = document.getElementById('pet-photo-label')
+  const petSpeciesHint = document.getElementById('pet-species-hint')
+  document.getElementById('pet-photo').addEventListener('change', async () => {
+    const file = document.getElementById('pet-photo').files[0]
+    if (!file) {
+      petPhotoPreview.classList.add('hidden')
+      petPhotoLabel.classList.remove('hidden')
+      petSpeciesHint.textContent = ''
+      speciesPromise = null
+      return
+    }
+    petPhotoPreview.src = URL.createObjectURL(file)
+    petPhotoPreview.classList.remove('hidden')
+    petPhotoLabel.classList.add('hidden')
+    petSpeciesHint.textContent = '종을 확인하고 있어요...'
+
+    state.petPhoto = await fileToDataUrl(file)
+    speciesPromise = api('/api/chat/classify-species', {
+      method: 'POST',
+      body: JSON.stringify({ image: state.petPhoto }),
+    }).then(({ ok, data }) => {
+      const species = ok ? data.species : ''
+      petSpeciesHint.textContent = species ? `${species}로 확인했어요` : ''
+      return species || ''
+    })
+  })
 
   function randomHex(len) {
     const bytes = new Uint8Array(len)
@@ -106,13 +137,12 @@
       return
     }
     const photoFile = document.getElementById('pet-photo').files[0]
-    if (!photoFile) {
+    if (!photoFile || !state.petPhoto) {
       alert('반려동물 사진을 선택해주세요.')
       return
     }
-    state.petPhoto = await fileToDataUrl(photoFile)
 
-    const species = document.getElementById('pet-species').value.trim()
+    const species = speciesPromise ? await speciesPromise : ''
     const personality = document.getElementById('pet-personality').value.trim()
 
     const { ok, data } = await api('/api/chat/pets', {

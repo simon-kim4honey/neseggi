@@ -357,15 +357,18 @@ generation.post('/start', async (c) => {
       ? await storeInputImage(c.env.NESEGGI_KV, jobId, 'background', backgroundImage)
       : null
 
+    // 관리자 페이지에서 확인할 수 있도록 실제로 AtlasCloud에 보낼 프롬프트
+    // 전문을 job 생성 시점에 함께 저장한다.
+    const prompt = buildPrompt(conceptId, hasOwnerImage, hasBackgroundImage)
+
     await db
       .prepare(
-        `INSERT INTO generation_logs (id, user_id, pet_id, owner_image_b64, pet_image_b64, background_image_b64, output_type, concept, status, credits_used, source)
-         VALUES (?, ?, ?, ?, ?, ?, 'image', ?, 'pending', 0, 'manual')`
+        `INSERT INTO generation_logs (id, user_id, pet_id, owner_image_b64, pet_image_b64, background_image_b64, output_type, concept, status, credits_used, source, prompt)
+         VALUES (?, ?, ?, ?, ?, ?, 'image', ?, 'pending', 0, 'manual', ?)`
       )
-      .bind(jobId, (user as any).id, petId, ownerImageKey, petImageKey, backgroundImageKey, conceptId)
+      .bind(jobId, (user as any).id, petId, ownerImageKey, petImageKey, backgroundImageKey, conceptId, prompt)
       .run()
 
-    const prompt = buildPrompt(conceptId, hasOwnerImage, hasBackgroundImage)
     const images = [petImage, ...(hasOwnerImage ? [ownerImage] : []), ...(hasBackgroundImage ? [backgroundImage] : [])]
     // 배경 사진이 있으면 여러 장을 정확히 구분해서 추론해야 하는 더 어려운
     // 케이스라 thinking_level을 높인다 (2026-09-10 테스트에서 default로는

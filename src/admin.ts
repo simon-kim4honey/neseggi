@@ -81,4 +81,69 @@ admin.get('/pets/:petId/photos/:photoId/image', async (c) => {
   })
 })
 
+// ────────────────────────────────────────────────────
+// GET /api/admin/generations — 사진 합성 job 목록. AtlasCloud에 실제로
+// 전달된 프롬프트 전문(prompt 컬럼, 2026-09-10 추가)을 포함한다 — 프롬프트
+// 문구가 리팩터링 중 조용히 깨지는 사고(CLAUDE.md 경고 참고)를 코드 리뷰가
+// 아니라 실제 런타임 값으로 확인할 수 있게 하는 용도.
+// query: limit(기본 50, 최대 200), petId?, userId?
+// ────────────────────────────────────────────────────
+admin.get('/generations', async (c) => {
+  const db = c.env.NESEGGI_DB
+  const limit = Math.min(Math.max(parseInt(c.req.query('limit') || '50', 10) || 50, 1), 200)
+  const petId = c.req.query('petId')
+  const userId = c.req.query('userId')
+
+  const conditions: string[] = []
+  const params: any[] = []
+  if (petId) {
+    conditions.push('g.pet_id = ?')
+    params.push(petId)
+  }
+  if (userId) {
+    conditions.push('g.user_id = ?')
+    params.push(userId)
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  const { results } = await db
+    .prepare(
+      `SELECT g.id, g.status, g.source, g.concept, g.prompt, g.error_message, g.atlas_job_id,
+              g.created_at, g.completed_at, g.pet_id, g.user_id,
+              p.name AS pet_name, u.email AS user_email
+       FROM generation_logs g
+       LEFT JOIN pets p ON p.id = g.pet_id
+       LEFT JOIN users u ON u.id = g.user_id
+       ${where}
+       ORDER BY g.created_at DESC
+       LIMIT ?`
+    )
+    .bind(...params, limit)
+    .all()
+
+  return c.json({ generations: results ?? [] })
+})
+
+// ────────────────────────────────────────────────────
+// GET /api/admin/generations/:jobId/image — 합성 결과 이미지를 관리자
+// 페이지에서 볼 수 있도록 스트리밍한다(chat.ts의 avatar-proxy와 같은 이유 —
+// AtlasCloud OSS 호스트를 <img src>가 직접 가리키면 일부 환경에서 깨진다).
+// ────────────────────────────────────────────────────
+admin.get('/generations/:jobId/image', async (c) => {
+  const db = c.env.NESEGGI_DB
+  const jobId = c.req.param('jobId')
+  const job: any = await db.prepare('SELECT result_url FROM generation_logs WHERE id = ?').bind(jobId).first()
+  if (!job?.result_url) return c.text('not_found', 404)
+
+  const upstream = await fetch(job.result_url)
+  if (!upstream.ok || !upstream.body) return c.text('upstream_error', 502)
+
+  return new Response(upstream.body, {
+    headers: {
+      'Content-Type': upstream.headers.get('content-type') || 'image/jpeg',
+      'Cache-Control': 'private, max-age=3600',
+    },
+  })
+})
+
 export { admin }

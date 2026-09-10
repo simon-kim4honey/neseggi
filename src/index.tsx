@@ -181,6 +181,41 @@ app.get('/test', (c) => {
   )
 })
 
+// ────────────────────────────────────────────────────
+// /admin — 관리자 전용 페이지. 지금은 사진 합성 job 목록 + AtlasCloud에
+// 실제로 전달된 프롬프트 전문을 확인하는 용도만 있다(CLAUDE.md의 "AI 생성
+// 프롬프트는 조용히 망가질 수 있다" 경고 대응 — 코드 리뷰가 아니라 실제
+// 런타임 값을 직접 확인할 수 있게). X-Admin-Password 헤더로 인증하며,
+// 브라우저가 커스텀 헤더를 못 보내는 GET 링크는 없으므로 이 페이지가 매
+// 요청에 헤더를 붙여 fetch한다.
+// ────────────────────────────────────────────────────
+app.get('/admin', (c) => {
+  return c.render(
+    <div id="admin-app" class="max-w-2xl mx-auto p-4 space-y-4">
+      <h1 class="text-xl font-bold">내새끼 관리자</h1>
+
+      <div id="admin-login" class="space-y-2">
+        <input id="admin-password" type="password" placeholder="관리자 비밀번호" class="input-field" />
+        <button id="admin-login-btn" class="btn-primary">확인</button>
+        <p id="admin-login-error" class="text-xs text-red-500"></p>
+      </div>
+
+      <div id="admin-content" class="hidden space-y-3">
+        <div class="flex justify-between items-center">
+          <h2 class="text-base font-semibold">사진 합성 프롬프트</h2>
+          <div class="flex gap-2">
+            <button id="admin-refresh" class="btn-secondary text-xs">새로고침</button>
+            <button id="admin-logout" class="btn-ghost text-xs underline">로그아웃</button>
+          </div>
+        </div>
+        <div id="admin-list" class="space-y-3"></div>
+      </div>
+
+      <script src={`/static/admin.js?v=${__BUILD_VERSION__}`} defer></script>
+    </div>
+  )
+})
+
 // TODO(neseggi): 실제 법률 검토 전까지는 placeholder. 내새끼 사업자 정보 확정 후 교체.
 app.get('/terms', (c) => c.render(<div class="prose mx-auto p-8">이용약관 — 작성 예정</div>))
 app.get('/privacy', (c) => c.render(<div class="prose mx-auto p-8">개인정보처리방침 — 작성 예정</div>))

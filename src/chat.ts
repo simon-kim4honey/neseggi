@@ -590,10 +590,10 @@ chat.post('/pets/:petId/daily-memory', async (c) => {
 
     await db
       .prepare(
-        `INSERT INTO generation_logs (id, user_id, pet_id, pet_image_b64, output_type, concept, status, credits_used, source)
-         VALUES (?, ?, ?, ?, 'image', ?, 'pending', 0, 'daily_memory')`
+        `INSERT INTO generation_logs (id, user_id, pet_id, pet_image_b64, output_type, concept, status, credits_used, source, prompt)
+         VALUES (?, ?, ?, ?, 'image', ?, 'pending', 0, 'daily_memory', ?)`
       )
-      .bind(jobId, (user as any).id, petId, picked.kvKey, conceptId)
+      .bind(jobId, (user as any).id, petId, picked.kvKey, conceptId, prompt)
       .run()
 
     const started = await startAtlasJob(c.env.ATLAS_API_KEY, prompt, [picked.dataUrl], 'default')

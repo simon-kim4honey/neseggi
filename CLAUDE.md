@@ -35,8 +35,16 @@ Cloudflare Workers/Pages + Hono + D1 + KV. EZlook(lookbook-ai)와 동일한
 lookbook-ai와 달리 `src/index.tsx`는 얇게 유지하고, 도메인별로 파일을 분리해
 `app.route()`로 마운트한다: `auth.ts`(인증/세션 — 이메일+카카오+구글 구현
 완료), `payments.ts`(토스/Stripe 결제 — 501 스텁, 미구현), `generation.ts`
-(AI 사진 합성), `admin.ts`(관리자 API — 스텁), `chat.ts`(반려동물 채팅,
-`@anthropic-ai/sdk` 사용).
+(AI 사진 합성), `admin.ts`(관리자 API — 회원/결제/크레딧 관리는 아직 스텁,
+반려동물 사진 풀 조회 + 사진 합성 job/프롬프트 열람은 구현됨), `chat.ts`
+(반려동물 채팅, `@anthropic-ai/sdk` 사용).
+
+`/admin`(`admin.ts` API + `public/static/admin.js`)은 관리자 전용 페이지 —
+`X-Admin-Password` 헤더 인증(비밀번호는 페이지에서 입력하면 localStorage에
+저장, 매 요청에 헤더로 붙여 보냄). 지금은 사진 합성 job 목록과 AtlasCloud에
+실제로 전달된 프롬프트 전문(`generation_logs.prompt`, `migrations/0011`)을
+보여주는 용도만 있음 — 프롬프트가 리팩터링 중 조용히 깨지는 사고(아래 경고
+참고)를 코드가 아니라 실제 런타임 값으로 확인할 수 있게 하려는 목적.
 
 `/test` (`src/index.tsx` + `public/static/test.js`)는 curl 없이 브라우저에서
 전체 흐름(반려동물 프로필 → 보호자 프로필/호칭/사진/배경사진 → 합성 → 채팅)을
@@ -221,17 +229,32 @@ AtlasCloud 쪽에 확인.
 - `ANTHROPIC_API_KEY` — 반려동물 채팅(Claude API) ✅ 등록됨
 - `KAKAO_CLIENT_ID` — EZlook(lookbook-ai)과 **동일 앱 재사용**(REST API 키).
   EZlook 쪽 "카카오 로그인 클라이언트 시크릿" 기능이 꺼져있어서
-  `KAKAO_CLIENT_SECRET`은 필요 없음(보내도 카카오가 검증 안 함). ✅ 등록됨
+  `KAKAO_CLIENT_SECRET`은 필요 없음(보내도 카카오가 검증 안 함).
+  **⚠️ 2026-09-10에 Preview 환경에서 빠져있는 게 확인됨 — 아마 예전에 겪은
+  "PATCH 직후 무관한 기존 키가 사라지는 현상"으로 유실된 것으로 추정.
+  이 값은 세션 로그에도 텍스트로 남아있지 않아(스크린샷으로만 전달돼서)
+  복구 못 함 — 카카오 로그인 버튼이 지금 `/test`에서 동작 안 할 것.
+  사용자가 카카오 개발자 콘솔에서 REST API 키를 다시 알려줘야 재등록 가능.**
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — EZlook과 동일 Google Cloud
   OAuth 클라이언트 재사용, neseggi 콜백 URL을 승인된 리디렉션 URI에 추가함.
+  `GOOGLE_CLIENT_ID`도 같은 이유로 한 번 유실됐던 걸 2026-09-10에 세션
+  로그에 남아있던 값으로 복구함(`502307677132-...apps.googleusercontent.com`).
   ✅ 등록됨
 - `TOSS_CLIENT_KEY`, `TOSS_SECRET_KEY` — 테스트/샌드박스 키만 등록됨(실제
-  가맹점 키 아님, 실서비스 전 교체 필요). `TOSS_API_BASE` =
-  `https://api.tosspayments.com` ✅ 등록됨
-- `ADMIN_PASSWORD` — 랜덤 생성해서 등록함(값은 세션 로그 참고, 별도
-  비밀번호 관리자로 옮겨둘 것) ✅ 등록됨
+  가맹점 키 아님, 실서비스 전 교체 필요). `TOSS_API_BASE`도 유실됐다가
+  2026-09-10에 `https://api.tosspayments.com`으로 복구함. ✅ 등록됨
+- `ADMIN_PASSWORD` — 2026-09-10에 새로 재발급함(기존 값은 write-only
+  secret이라 API로 다시 읽을 수 없어서 교체) — 현재 값은 이 세션 대화
+  로그 참고, 별도 비밀번호 관리자로 옮겨둘 것. ✅ 등록됨
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` — 해외 결제(선택), 미등록
 - `GA4_MEASUREMENT_ID` — `wrangler.jsonc`의 `vars`, 아직 placeholder
+
+**교훈**: `secret_text` 타입 env var는 Cloudflare API로 값을 다시 읽을 수
+없다(GET 응답이 항상 빈 문자열) — PATCH로 다른 키를 추가/수정할 때 실수로
+날아가면 그 세션 로그에 값이 텍스트로 남아있지 않은 한 복구 불가능하다.
+시크릿을 등록/변경한 직후엔 항상 전체 키 목록을 다시 조회해서 개수/이름이
+그대로인지 확인할 것(값까지는 확인 못 해도 최소한 키가 사라지진 않았는지는
+알 수 있음).
 
 **Production 환경 시크릿은 아직 안 넣음** — `main` 승격 전 Cloudflare
 대시보드에서 Preview와 구분해서 별도로 채울 것 (카카오/구글은 실서비스

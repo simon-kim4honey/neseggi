@@ -4,6 +4,7 @@ import { auth } from './auth'
 import { payments } from './payments'
 import { generation } from './generation'
 import { admin } from './admin'
+import { chat } from './chat'
 
 type Bindings = {
   NESEGGI_DB: D1Database
@@ -15,6 +16,7 @@ type Bindings = {
   GOOGLE_CLIENT_ID: string
   GOOGLE_CLIENT_SECRET: string
   ATLAS_API_KEY: string
+  ANTHROPIC_API_KEY: string
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -25,6 +27,7 @@ app.route('/api/auth', auth)
 app.route('/payment', payments)
 app.route('/api/generate', generation)
 app.route('/api/admin', admin)
+app.route('/api/chat', chat)
 
 app.get('/', (c) => {
   return c.render(

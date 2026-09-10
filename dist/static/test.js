@@ -409,7 +409,6 @@
     // 폴링을 시작하고 실패하면 상황에 맞게(로딩 화면 or 채팅 중) 알려준다.
     api('/api/generate/start', {
       method: 'POST',
-      headers: { 'X-Neseggi-QA': '1' }, // QA 테스트 페이지 전용 — 크레딧 차감 우회
       body: JSON.stringify(body),
     }).then(({ ok, data }) => {
       if (!ok) {

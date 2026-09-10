@@ -10,7 +10,6 @@ type Bindings = {
 const generation = new Hono<{ Bindings: Bindings }>()
 
 const ATLAS_API_BASE = 'https://api.atlascloud.ai'
-const GENERATION_CREDIT_COST = 5
 
 function atlasHeaders(apiKey: string) {
   return { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
@@ -341,37 +340,11 @@ generation.post('/start', async (c) => {
     const hasOwnerImage = isDataUrl(ownerImage)
     const hasBackgroundImage = isDataUrl(backgroundImage)
 
-    // ⚠️ 출시 전 QA 전용 우회 — /test 페이지만 이 헤더를 보낸다. 실제 결제/크레딧
-    // 시스템이 붙기 전까지만 쓰는 임시 장치이므로, 정식 오픈 전에 반드시 제거하거나
-    // (관리자 인증 등으로) 잠글 것. 그대로 두면 아무나 이 헤더로 무료 생성 가능.
-    const isQaTest = c.req.header('X-Neseggi-QA') === '1'
-    const creditsCost = isQaTest ? 0 : GENERATION_CREDIT_COST
-
-    if ((user as any).credits < creditsCost) {
-      return c.json({ error: '크레딧이 부족합니다.', code: 'INSUFFICIENT_CREDITS' }, 402)
-    }
-
+    // 사진 합성은 크레딧 차감 없이 전부 무료로 제공한다 — 수익화는 월정액
+    // 구독으로 할 예정(2026-09-10 결정, 아직 결제 라우트 미구현). 예전에
+    // 있던 크레딧 차감 + QA 전용 우회 헤더(X-Neseggi-QA)는 더 이상 필요 없어
+    // 제거함 — 전부 무료라 우회할 대상 자체가 없다.
     const jobId = newJobId()
-
-    // 차감은 잔액 조건을 다시 걸어 동시 요청으로 인한 이중 차감을 방지
-    const deduct = await db
-      .prepare('UPDATE users SET credits = credits - ? WHERE id = ? AND credits >= ?')
-      .bind(creditsCost, (user as any).id, creditsCost)
-      .run()
-    if (!deduct.meta.changes) {
-      return c.json({ error: '크레딧이 부족합니다.', code: 'INSUFFICIENT_CREDITS' }, 402)
-    }
-
-    if (creditsCost > 0) {
-      const balanceRow: any = await db.prepare('SELECT credits FROM users WHERE id = ?').bind((user as any).id).first()
-      await db
-        .prepare(
-          `INSERT INTO credit_logs (user_id, type, amount, balance, reason, ref_id)
-           VALUES (?, 'deduct', ?, ?, 'pet_photo_generation', ?)`
-        )
-        .bind((user as any).id, -creditsCost, balanceRow.credits, jobId)
-        .run()
-    }
 
     // 반려동물 사진은 이미 pet_photos 풀의 KV 키를 그대로 재사용(중복 저장 안 함).
     // 보호자/배경 사진은 여전히 그때그때 업로드되는 1회성 입력이라 기존처럼 KV에
@@ -387,9 +360,9 @@ generation.post('/start', async (c) => {
     await db
       .prepare(
         `INSERT INTO generation_logs (id, user_id, pet_id, owner_image_b64, pet_image_b64, background_image_b64, output_type, concept, status, credits_used, source)
-         VALUES (?, ?, ?, ?, ?, ?, 'image', ?, 'pending', ?, 'manual')`
+         VALUES (?, ?, ?, ?, ?, ?, 'image', ?, 'pending', 0, 'manual')`
       )
-      .bind(jobId, (user as any).id, petId, ownerImageKey, petImageKey, backgroundImageKey, conceptId, creditsCost)
+      .bind(jobId, (user as any).id, petId, ownerImageKey, petImageKey, backgroundImageKey, conceptId)
       .run()
 
     const prompt = buildPrompt(conceptId, hasOwnerImage, hasBackgroundImage)
@@ -402,7 +375,6 @@ generation.post('/start', async (c) => {
     const started = await startAtlasJob(c.env.ATLAS_API_KEY, prompt, images, thinkingLevel)
     if (!started.ok) {
       await updateJob(db, jobId, { status: 'failed', error_message: started.message })
-      await refundCredits(db, (user as any).id, jobId, creditsCost)
       return c.json({ error: started.message, code: 'ATLAS_START_FAILED' }, 502)
     }
     await updateJob(db, jobId, { status: 'processing', atlas_job_id: started.atlasJobId })

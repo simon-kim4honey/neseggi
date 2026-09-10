@@ -50,6 +50,11 @@ body {
 }
 
 /* 공통 버튼 */
+.btn-primary,
+.btn-secondary,
+.btn-ghost {
+  white-space: nowrap;
+}
 .btn-primary {
   background: linear-gradient(135deg, var(--brand), var(--brand-dark));
   color: #fff;

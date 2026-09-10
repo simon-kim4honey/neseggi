@@ -77,7 +77,7 @@ app.get('/test', (c) => {
           <h2 class="text-lg font-bold">저를 뭐라고 부를까요?</h2>
           <div id="title-options" class="flex flex-wrap gap-2"></div>
           <input id="title-custom" type="text" placeholder="직접 입력 (예: 지수)" class="input-field" />
-          <div class="flex justify-between pt-2">
+          <div class="flex flex-wrap gap-2 justify-between items-center pt-2">
             <button id="step-title-back" class="btn-ghost">이전단계</button>
             <button id="step-title-next" class="btn-primary">다음단계</button>
           </div>
@@ -92,9 +92,9 @@ app.get('/test', (c) => {
             <span id="owner-photo-label">사진 선택하기</span>
           </label>
           <input id="owner-photo" type="file" accept="image/*" class="hidden" />
-          <div class="flex justify-between pt-2">
+          <div class="flex flex-wrap gap-2 justify-between items-center pt-2">
             <button id="step-owner-photo-back" class="btn-ghost">이전단계</button>
-            <div class="flex gap-2">
+            <div class="flex flex-wrap gap-2">
               <button id="step-owner-photo-skip" class="btn-secondary">넣지 않아도 괜찮아요</button>
               <button id="step-owner-photo-next" class="btn-primary">다음단계</button>
             </div>
@@ -110,9 +110,9 @@ app.get('/test', (c) => {
             <span id="bg-photo-label">사진 선택하기</span>
           </label>
           <input id="bg-photo" type="file" accept="image/*" class="hidden" />
-          <div class="flex justify-between pt-2">
+          <div class="flex flex-wrap gap-2 justify-between items-center pt-2">
             <button id="step-bg-photo-back" class="btn-ghost">이전단계</button>
-            <div class="flex gap-2">
+            <div class="flex flex-wrap gap-2">
               <button id="step-bg-photo-skip" class="btn-secondary">넣지 않아도 괜찮아요</button>
               <button id="step-bg-photo-next" class="btn-primary">다음단계</button>
             </div>

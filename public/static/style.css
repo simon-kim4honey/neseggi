@@ -30,25 +30,6 @@ body {
   color: #4a3540;
 }
 
-/* 진행 표시 점 */
-#progress-dots {
-  display: flex;
-  gap: 6px;
-  justify-content: center;
-  padding: 16px 0 4px;
-}
-#progress-dots span {
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: #f2d4dd;
-  transition: background 0.2s, width 0.2s;
-}
-#progress-dots span.active {
-  background: var(--brand);
-  width: 20px;
-}
-
 /* 공통 버튼 */
 .btn-primary,
 .btn-secondary,
@@ -209,6 +190,34 @@ body {
   border-top: 1.5px solid #f2dde4;
   box-shadow: 0 -6px 20px rgba(232, 85, 133, 0.1);
   z-index: 30;
+}
+
+/* 채팅 상단바(프로필 사진+이름 / 메뉴 버튼)를 뷰포트 최상단에 고정 —
+   .chat-input-bar와 같은 방식으로 #test-app과 같은 최대 너비로 중앙 고정. */
+.chat-header-bar {
+  position: fixed;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 28rem; /* Tailwind max-w-md */
+  box-sizing: border-box;
+  padding: 14px 22px;
+  padding-top: calc(14px + env(safe-area-inset-top));
+  background: #fff;
+  border-bottom: 1.5px solid #f2dde4;
+  box-shadow: 0 6px 20px rgba(232, 85, 133, 0.08);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* 상단에 .chat-header-bar가 고정되면서 가려지는 만큼 채팅 화면 콘텐츠에
+   여백을 준다 — #test-app .step-inner보다 나중에 나와야 동일 우선순위에서
+   이 규칙이 이긴다. */
+#step-chat.step-inner {
+  padding-top: 84px;
 }
 
 /* 채팅 속 합성 사진 썸네일 — 채팅창 폭의 30%, 클릭하면 라이트박스로 확대 */

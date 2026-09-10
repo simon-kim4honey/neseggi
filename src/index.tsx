@@ -50,14 +50,6 @@ app.get('/test', (c) => {
   return c.render(
     <>
       <div id="test-app" class="max-w-md mx-auto">
-        <div id="progress-dots">
-          <span data-group="login"></span>
-          <span data-group="pet"></span>
-          <span data-group="owner"></span>
-          <span data-group="gen"></span>
-          <span data-group="chat"></span>
-        </div>
-
         {/* 0. 로그인 */}
         <section id="step-login" class="step step-inner space-y-3" data-group="login">
           <h2 class="text-lg font-bold">로그인</h2>
@@ -158,7 +150,7 @@ app.get('/test', (c) => {
         <section id="step-chat" class="step step-inner hidden space-y-3 pb-20" data-group="chat">
           {/* 카카오톡처럼 상단바(프로필 사진+이름 / 메뉴 버튼)를 두고, 앞으로
               추가되는 기능들은 계속 이 메뉴 안에 넣는다. */}
-          <div class="flex items-center justify-between pb-2 border-b border-gray-100 -mt-1">
+          <div class="chat-header-bar">
             <div class="flex items-center gap-2 min-w-0">
               <img id="chat-header-avatar" class="w-9 h-9 rounded-full object-cover border cursor-pointer flex-shrink-0" />
               <span id="chat-header-name" class="font-semibold text-sm truncate"></span>

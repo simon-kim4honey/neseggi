@@ -275,11 +275,8 @@
     'step-photo-album',
     'step-profile',
   ]
-  const progressDots = Array.from(document.querySelectorAll('#progress-dots span'))
   function showStep(id) {
     steps.forEach((s) => document.getElementById(s).classList.toggle('hidden', s !== id))
-    const activeGroup = document.getElementById(id).dataset.group
-    progressDots.forEach((dot) => dot.classList.toggle('active', dot.dataset.group === activeGroup))
   }
 
   // ── 1. 반려동물 프로필 ──

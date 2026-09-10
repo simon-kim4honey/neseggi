@@ -193,6 +193,24 @@ body {
   border-radius: 18px;
 }
 
+/* 메시지 입력창을 뷰포트 가장 아래에 고정 — #test-app이 max-w-md로 가운데
+   정렬돼 있으니, 입력창도 같은 최대 너비로 화면 중앙에 고정해서 카드와
+   나란히 붙어 보이게 한다. */
+.chat-input-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 28rem; /* Tailwind max-w-md */
+  box-sizing: border-box;
+  padding: 12px 22px calc(12px + env(safe-area-inset-bottom));
+  background: #fff;
+  border-top: 1.5px solid #f2dde4;
+  box-shadow: 0 -6px 20px rgba(232, 85, 133, 0.1);
+  z-index: 30;
+}
+
 /* 채팅 속 합성 사진 썸네일 — 채팅창 폭의 30%, 클릭하면 라이트박스로 확대 */
 .chat-thumb {
   width: 30%;

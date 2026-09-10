@@ -155,7 +155,7 @@ app.get('/test', (c) => {
         </section>
 
         {/* 4. 채팅 */}
-        <section id="step-chat" class="step step-inner hidden space-y-3" data-group="chat">
+        <section id="step-chat" class="step step-inner hidden space-y-3 pb-20" data-group="chat">
           {/* 카카오톡처럼 상단바(프로필 사진+이름 / 메뉴 버튼)를 두고, 앞으로
               추가되는 기능들은 계속 이 메뉴 안에 넣는다. */}
           <div class="flex items-center justify-between pb-2 border-b border-gray-100 -mt-1">
@@ -185,14 +185,15 @@ app.get('/test', (c) => {
             </div>
           </div>
 
-          {/* 메시지 입력창은 항상 화면에 보여야 한다 — 메시지 영역은 뷰포트
-              높이 기준으로 최대 높이를 제한하고 내부에서만 스크롤되게 해서,
-              입력창을 보려고 페이지 전체를 스크롤할 필요가 없게 한다. 합성된
-              사진은 별도 큰 이미지가 아니라 반려동물 메시지의 썸네일로 온다. */}
+          {/* 메시지 영역은 뷰포트 높이 기준으로 최대 높이를 제한하고 내부에서만
+              스크롤되게 한다. 합성된 사진은 별도 큰 이미지가 아니라 반려동물
+              메시지의 썸네일로 온다. */}
           <div id="chat-scroll" class="max-h-[50vh] overflow-y-auto space-y-3 pr-1">
             <div id="chat-messages" class="p-3 space-y-2 text-sm"></div>
           </div>
-          <div class="flex gap-2">
+          {/* 입력창은 화면(뷰포트) 가장 아래에 고정 — 스크롤을 해도 항상
+              같은 자리에 보이도록 position: fixed(style.css의 .chat-input-bar). */}
+          <div class="chat-input-bar flex gap-2">
             <input id="chat-input" type="text" placeholder="메시지 입력..." class="input-field flex-1" />
             <button id="chat-send" class="btn-primary">보내기</button>
           </div>

@@ -1,14 +1,15 @@
-# PetLook
+# 내새끼 (neseggi)
 
-반려동물 보호자가 본인 사진(또는 반려동물 사진) 1장을 업로드하면, AI가 보호자와
-반려동물이 함께 찍은 자연스러운 합성 사진/영상을 자동 생성해주는 서비스.
+[www.neseggi.com](https://www.neseggi.com) — 반려동물 보호자가 본인 사진(또는
+반려동물 사진) 1장을 업로드하면, AI가 보호자와 반려동물이 함께 찍은 자연스러운
+합성 사진/영상을 자동 생성해주는 서비스.
 
 EZlook([lookbook-ai](https://github.com/simon-kim4honey/lookbook-ai))와 기술
 아키텍처/서비스 구조를 그대로 재사용하되, 사업 도메인은 완전히 다른 별도 서비스.
 
 ## 스택
 
-Cloudflare Workers/Pages + Hono + D1(`PETLOOK_DB`) + KV(`PETLOOK_KV`) + Vite +
+Cloudflare Workers/Pages + Hono + D1(`NESEGGI_DB`) + KV(`NESEGGI_KV`) + Vite +
 Vanilla JS(`public/static/app.js`) + Tailwind CDN.
 
 ## 개발

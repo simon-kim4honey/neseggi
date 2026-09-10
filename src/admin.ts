@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 
 type Bindings = {
-  PETLOOK_DB: D1Database
+  NESEGGI_DB: D1Database
   ADMIN_PASSWORD: string
 }
 
@@ -15,7 +15,7 @@ admin.use('/*', async (c, next) => {
   await next()
 })
 
-// TODO(petlook): 회원 목록/상세, 결제내역, 생성내역(썸네일), 크레딧 이벤트 로그, 실패 케이스 조회
+// TODO(neseggi): 회원 목록/상세, 결제내역, 생성내역(썸네일), 크레딧 이벤트 로그, 실패 케이스 조회
 admin.get('/users', async (c) => {
   return c.json({ error: 'not_implemented' }, 501)
 })

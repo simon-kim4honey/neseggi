@@ -1,4 +1,4 @@
--- PetLook — 회원 테이블
+-- 내새끼 — 회원 테이블
 -- 카카오, 구글, 이메일 통합 인증 (lookbook-ai 0002_users.sql 구조 재사용)
 
 CREATE TABLE IF NOT EXISTS users (

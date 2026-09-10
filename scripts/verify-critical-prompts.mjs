@@ -10,7 +10,7 @@
 // 이 스크립트는 `npm run build`에 포함되어 있어, 아래 GUARDS 배열에 등록된
 // 핵심 문구 중 하나라도 소스에서 사라지면 빌드 자체를 실패시킨다.
 //
-// PetLook은 아직 AI 생성 프롬프트를 작성하지 않았다 — 실제 프롬프트를
+// 내새끼는 아직 AI 생성 프롬프트를 작성하지 않았다 — 실제 프롬프트를
 // src/generation.ts에 작성하는 시점에 아래 GUARDS 배열을 함께 채울 것.
 // 완벽한 가드는 아니다(문구 존재만 확인, 의미 전체를 검증 못함). 그래도
 // 실수로 통째로 날리는 사고는 막아준다.
@@ -24,7 +24,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const srcPath = join(__dirname, '..', 'src', 'generation.ts')
 const src = readFileSync(srcPath, 'utf8')
 
-// TODO(petlook): 실제 생성 프롬프트를 작성하면 여기에 핵심 문구를 등록할 것.
+// TODO(neseggi): 실제 생성 프롬프트를 작성하면 여기에 핵심 문구를 등록할 것.
 // 형식은 lookbook-ai/scripts/verify-critical-prompts.mjs 참고:
 // { name: '...', must: '반드시 남아있어야 하는 문구', why: '왜 중요한지' }
 const GUARDS = []

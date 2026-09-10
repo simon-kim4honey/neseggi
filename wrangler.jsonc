@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "petlook",
+  "name": "neseggi",
   "compatibility_date": "2026-07-10",
   "pages_build_output_dir": "./dist",
   "compatibility_flags": [
@@ -8,15 +8,15 @@
   ],
   "d1_databases": [
     {
-      "binding": "PETLOOK_DB",
-      "database_name": "petlook-staging",
+      "binding": "NESEGGI_DB",
+      "database_name": "neseggi-staging",
       "database_id": "REPLACE_WITH_STAGING_D1_ID",
       "preview_database_id": "REPLACE_WITH_STAGING_D1_PREVIEW_ID"
     }
   ],
   "kv_namespaces": [
     {
-      "binding": "PETLOOK_KV",
+      "binding": "NESEGGI_KV",
       "id": "REPLACE_WITH_STAGING_KV_ID",
       "preview_id": "REPLACE_WITH_STAGING_KV_PREVIEW_ID"
     }

@@ -1,4 +1,4 @@
-# PetLook
+# 내새끼 (neseggi)
 
 Cloudflare Workers/Pages + Hono + D1 + KV. EZlook(lookbook-ai)와 동일한
 아키텍처 패턴을 따르는 별도 서비스 — 도메인은 반려동물 보호자+반려동물 합성
@@ -30,7 +30,7 @@ lookbook-ai와 달리 `src/index.tsx`는 얇게 유지하고, 도메인별로 �
 - `users`, `user_sessions` — 이메일/카카오/구글 인증 (`migrations/0001_users.sql`)
 - `credit_logs` — 크레딧 증감 원장 (`migrations/0002_credit_logs.sql`)
 - `payment_logs` — 토스페이먼츠/Stripe 결제 내역 (`migrations/0003_payment_logs.sql`)
-- `generation_logs` — PetLook 고유 스키마(보호자 사진 + 반려동물 사진 2-슬롯),
+- `generation_logs` — 내새끼 고유 스키마(보호자 사진 + 반려동물 사진 2-슬롯),
   lookbook-ai의 3-슬롯 구조와 다름 (`migrations/0004_generation_logs.sql`)
 
 ## 결제 (토스페이먼츠)
@@ -61,11 +61,11 @@ lookbook-ai와 달리 `src/index.tsx`는 얇게 유지하고, 도메인별로 �
 
 - Cloudflare Workers/Pages 프로젝트 생성 + D1/KV(스테이징/운영 분리) 실제 생성
   → `wrangler.jsonc`의 `REPLACE_WITH_*` 값 채우기
-- 토스페이먼츠 PetLook용 가맹점 가입 + API 개별연동 키 발급
+- 토스페이먼츠 내새끼용 가맹점 가입 + API 개별연동 키 발급
 - AI 생성 API(AtlasCloud 등) 계약/키 확인, 반려동물 합성 가능 여부 검증 →
   `src/generation.ts` 실제 구현 + `scripts/verify-critical-prompts.mjs`의
   `GUARDS` 채우기
 - 인증/결제 라우트 실제 구현 (`src/auth.ts`, `src/payments.ts`는 현재 501
   스텁)
-- `/terms`, `/privacy`, `/refund-policy` — PetLook 사업자 정보로 실제 내용 작성
+- `/terms`, `/privacy`, `/refund-policy` — 내새끼 사업자 정보로 실제 내용 작성
   (전자상거래법 제17조 기준 청약철회 조항 포함)

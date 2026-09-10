@@ -1,4 +1,4 @@
--- PetLook — 크레딧 차감/지급 로그 테이블 (원장/ledger)
+-- 내새끼 — 크레딧 차감/지급 로그 테이블 (원장/ledger)
 -- 크레딧당 원가는 AI API 계약 확정 후 결정
 
 CREATE TABLE IF NOT EXISTS credit_logs (

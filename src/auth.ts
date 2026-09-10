@@ -1,8 +1,8 @@
 import { Hono } from 'hono'
 
 type Bindings = {
-  PETLOOK_DB: D1Database
-  PETLOOK_KV: KVNamespace
+  NESEGGI_DB: D1Database
+  NESEGGI_KV: KVNamespace
 }
 
 const auth = new Hono<{ Bindings: Bindings }>()
@@ -32,17 +32,17 @@ function newSessionToken(): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-// TODO(petlook): 회원가입 — 이메일/비밀번호, 가입 보너스 크레딧 지급까지 확정 후 구현
+// TODO(neseggi): 회원가입 — 이메일/비밀번호, 가입 보너스 크레딧 지급까지 확정 후 구현
 auth.post('/signup', async (c) => {
   return c.json({ error: 'not_implemented' }, 501)
 })
 
-// TODO(petlook): 로그인 — 세션 생성(user_sessions), X-Session-Token 발급
+// TODO(neseggi): 로그인 — 세션 생성(user_sessions), X-Session-Token 발급
 auth.post('/login', async (c) => {
   return c.json({ error: 'not_implemented' }, 501)
 })
 
-// TODO(petlook): 카카오/구글 OAuth 콜백
+// TODO(neseggi): 카카오/구글 OAuth 콜백
 auth.get('/oauth/:provider/callback', async (c) => {
   return c.json({ error: 'not_implemented' }, 501)
 })
@@ -50,7 +50,7 @@ auth.get('/oauth/:provider/callback', async (c) => {
 auth.post('/logout', async (c) => {
   const token = c.req.header('X-Session-Token')
   if (token) {
-    await c.env.PETLOOK_DB.prepare('DELETE FROM user_sessions WHERE token = ?').bind(token).run()
+    await c.env.NESEGGI_DB.prepare('DELETE FROM user_sessions WHERE token = ?').bind(token).run()
   }
   return c.json({ ok: true })
 })

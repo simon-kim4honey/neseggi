@@ -6,7 +6,7 @@ export const renderer = jsxRenderer(({ children }) => {
       <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>PetLook</title>
+        <title>내새끼</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="/static/style.css" rel="stylesheet" />
       </head>

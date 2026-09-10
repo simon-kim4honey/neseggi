@@ -266,6 +266,7 @@
     'step-generating',
     'step-chat',
     'step-photo-album',
+    'step-profile',
   ]
   const progressDots = Array.from(document.querySelectorAll('#progress-dots span'))
   function showStep(id) {
@@ -496,6 +497,7 @@
     const caption = ok ? data.caption : null
 
     if (state.chatEntered) {
+      renderChatHeader()
       if (caption) appendMessage('pet', caption)
       appendPetImageMessage(jobId)
     } else {
@@ -518,6 +520,8 @@
   const chatScrollEl = document.getElementById('chat-scroll')
   const chatInput = document.getElementById('chat-input')
   const chatSendBtn = document.getElementById('chat-send')
+  const chatHeaderAvatar = document.getElementById('chat-header-avatar')
+  const chatHeaderName = document.getElementById('chat-header-name')
   const lightboxOverlay = document.getElementById('image-lightbox')
   const lightboxImg = document.getElementById('image-lightbox-img')
 
@@ -641,6 +645,20 @@
     chatScrollEl.scrollTop = chatScrollEl.scrollHeight
   }
 
+  // 상단바 프로필 사진+이름 — 작은 아바타와 같은 방식(재시도 + 클릭하면
+  // 라이트박스로 확대)으로 채운다.
+  function renderChatHeader() {
+    chatHeaderName.textContent = state.petName || '반려동물'
+    if (!state.petAvatarUrl || !state.petId) {
+      chatHeaderAvatar.src = ''
+      chatHeaderAvatar.onclick = null
+      return
+    }
+    const proxiedUrl = avatarProxyUrl(state.petId)
+    chatHeaderAvatar.onclick = () => openLightbox(proxiedUrl)
+    setImageWithRetry(chatHeaderAvatar, proxiedUrl, 0, () => {})
+  }
+
   async function enterChat() {
     state.chatEntered = true
     if (!state.petName || !state.petAvatarUrl) {
@@ -651,6 +669,7 @@
         state.petAvatarUrl = state.petAvatarUrl || pet.avatar_url
       }
     }
+    renderChatHeader()
     showStep('step-chat')
     chatMessagesEl.innerHTML = ''
 
@@ -744,18 +763,36 @@
     }
   })
 
-  document.getElementById('restart').addEventListener('click', () => {
+  // ── 채팅 상단바 메뉴 — 카카오톡처럼 프로필 사진+이름을 왼쪽에, ☰ 메뉴
+  // 버튼을 오른쪽에 둔다. 앞으로 추가되는 기능은 계속 이 메뉴 안에 넣는다.
+  const chatMenuBtn = document.getElementById('chat-menu-btn')
+  const chatMenuDropdown = document.getElementById('chat-menu-dropdown')
+
+  function closeChatMenu() {
+    chatMenuDropdown.classList.add('hidden')
+  }
+  chatMenuBtn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    chatMenuDropdown.classList.toggle('hidden')
+  })
+  document.addEventListener('click', (e) => {
+    if (!chatMenuDropdown.classList.contains('hidden') && !chatMenuDropdown.contains(e.target)) {
+      closeChatMenu()
+    }
+  })
+
+  function restartFromScratch() {
     localStorage.removeItem(PET_ID_KEY)
     localStorage.removeItem(RESULT_URL_KEY)
     location.reload()
-  })
+  }
 
-  // ── 5. 사진첩 — 지금까지 생성한 사진 전체(수동 합성 + 오늘의 추억사진)를
+  // ── 사진첩 — 지금까지 생성한 사진 전체(수동 합성 + 오늘의 추억사진)를
   // 최신순으로 보여준다. 진행 중인 채팅 상태는 그대로 두고 화면만 전환한다.
   const photoAlbumGrid = document.getElementById('photo-album-grid')
   const photoAlbumEmpty = document.getElementById('photo-album-empty')
 
-  document.getElementById('open-photo-album').addEventListener('click', async () => {
+  async function openPhotoAlbum() {
     showStep('step-photo-album')
     photoAlbumGrid.innerHTML = ''
     photoAlbumEmpty.classList.add('hidden')
@@ -775,9 +812,39 @@
       photoAlbumGrid.appendChild(img)
       setImageWithRetry(img, proxiedUrl, 0, () => img.remove())
     })
+  }
+  document.getElementById('photo-album-back').addEventListener('click', () => showStep('step-chat'))
+
+  // ── 사용자 프로필 ──
+  async function openProfile() {
+    showStep('step-profile')
+    const { ok, data } = await api('/api/auth/me')
+    const user = ok ? data.user : null
+    document.getElementById('profile-name').textContent = user ? user.name || '-' : '-'
+    document.getElementById('profile-email').textContent = user ? user.email || '-' : '-'
+    document.getElementById('profile-provider').textContent = user ? user.provider || 'email' : '-'
+  }
+  document.getElementById('profile-back').addEventListener('click', () => showStep('step-chat'))
+  document.getElementById('profile-logout').addEventListener('click', async () => {
+    await api('/api/auth/logout', { method: 'POST' })
+    setToken(null)
+    localStorage.removeItem(PET_ID_KEY)
+    localStorage.removeItem(RESULT_URL_KEY)
+    location.reload()
   })
 
-  document.getElementById('photo-album-back').addEventListener('click', () => showStep('step-chat'))
+  document.getElementById('menu-profile').addEventListener('click', () => {
+    closeChatMenu()
+    openProfile()
+  })
+  document.getElementById('menu-photo-album').addEventListener('click', () => {
+    closeChatMenu()
+    openPhotoAlbum()
+  })
+  document.getElementById('menu-restart').addEventListener('click', () => {
+    closeChatMenu()
+    restartFromScratch()
+  })
 
   // ── 시작 ──
   ;(async function init() {

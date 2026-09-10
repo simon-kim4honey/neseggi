@@ -380,7 +380,7 @@ chat.get('/pets/:petId/messages', async (c) => {
   if (!pet) return c.json({ error: 'not_found' }, 404)
 
   const { results } = await db
-    .prepare(`SELECT id, role, content, created_at FROM chat_messages WHERE pet_id = ? ORDER BY created_at ASC`)
+    .prepare(`SELECT id, role, content, generation_id, created_at FROM chat_messages WHERE pet_id = ? ORDER BY created_at ASC`)
     .bind(petId)
     .all()
 
@@ -413,7 +413,7 @@ chat.post('/pets/:petId/greeting', async (c) => {
       .first()
     if (existing) {
       const { results } = await db
-        .prepare(`SELECT id, role, content, created_at FROM chat_messages WHERE pet_id = ? ORDER BY created_at ASC`)
+        .prepare(`SELECT id, role, content, generation_id, created_at FROM chat_messages WHERE pet_id = ? ORDER BY created_at ASC`)
         .bind(petId)
         .all()
       return c.json({ messages: results ?? [] })
@@ -467,6 +467,8 @@ chat.post('/pets/:petId/greeting', async (c) => {
 // 사진 내용을 설명하게 하지 말고, 무지개나라에서의 한 순간을 사진으로
 // 보여주는 듯한 짧은 멘트만 받는다. 인사와 달리 매번 호출될 때마다 새로
 // 생성하고 대화 이력에 남긴다.
+// body: { jobId?: string } — 주면 캡션 뒤에 이미지 메시지도 대화 이력에
+// 남겨서, 나중에 채팅을 다시 열어도(새로고침 등) 썸네일이 재구성된다.
 // ────────────────────────────────────────────────────
 chat.post('/pets/:petId/photo-caption', async (c) => {
   try {
@@ -481,6 +483,9 @@ chat.post('/pets/:petId/photo-caption', async (c) => {
       .bind(petId, (user as any).id)
       .first()
     if (!pet) return c.json({ error: 'not_found' }, 404)
+
+    const body = await c.req.json().catch(() => null)
+    const jobId = typeof body?.jobId === 'string' ? body.jobId : null
 
     const persona = buildPersonaSystemPrompt({
       name: pet.name,
@@ -502,6 +507,13 @@ chat.post('/pets/:petId/photo-caption', async (c) => {
       .prepare(`INSERT INTO chat_messages (pet_id, user_id, role, content) VALUES (?, ?, 'pet', ?)`)
       .bind(petId, (user as any).id, captionText)
       .run()
+
+    if (jobId) {
+      await db
+        .prepare(`INSERT INTO chat_messages (pet_id, user_id, role, content, generation_id) VALUES (?, ?, 'pet', '', ?)`)
+        .bind(petId, (user as any).id, jobId)
+        .run()
+    }
 
     return c.json({ caption: captionText })
   } catch (err: any) {
@@ -569,6 +581,10 @@ chat.post('/pets/:petId/daily-memory', async (c) => {
           await db
             .prepare(`INSERT INTO chat_messages (pet_id, user_id, role, content) VALUES (?, ?, 'pet', ?)`)
             .bind(petId, (user as any).id, captionText)
+            .run()
+          await db
+            .prepare(`INSERT INTO chat_messages (pet_id, user_id, role, content, generation_id) VALUES (?, ?, 'pet', '', ?)`)
+            .bind(petId, (user as any).id, today.id)
             .run()
           await db.prepare(`UPDATE generation_logs SET notified = 1 WHERE id = ?`).bind(today.id).run()
         }
@@ -639,7 +655,7 @@ chat.post('/pets/:petId/messages', async (c) => {
 
     const { results: history } = await db
       .prepare(
-        `SELECT role, content FROM chat_messages WHERE pet_id = ? ORDER BY created_at DESC LIMIT ?`
+        `SELECT role, content FROM chat_messages WHERE pet_id = ? AND generation_id IS NULL ORDER BY created_at DESC LIMIT ?`
       )
       .bind(petId, MAX_HISTORY_MESSAGES)
       .all()

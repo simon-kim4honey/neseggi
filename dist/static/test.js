@@ -19,6 +19,7 @@
     // 바로 썸네일 메시지를 보낼 수 있도록 대기시켜두는 값들
     chatEntered: false,
     pendingImageUrl: null,
+    pendingImageJobId: null,
     pendingImageCaption: null,
     pendingGenerationError: null,
   }
@@ -405,6 +406,7 @@
     genRetryBtn.classList.add('hidden')
     state.chatEntered = false
     state.pendingImageUrl = null
+    state.pendingImageJobId = null
     state.pendingImageCaption = null
     state.pendingGenerationError = null
 
@@ -458,7 +460,7 @@
       if (!ok) return // 일시적 오류 — 다음 폴링에서 재시도
       if (data.status === 'done') {
         clearInterval(interval)
-        handleGeneratedImage(data.resultUrl)
+        handleGeneratedImage(data.resultUrl, jobId)
       } else if (data.status === 'failed') {
         clearInterval(interval)
         handleGenerationFailed(data.errorMessage)
@@ -466,7 +468,7 @@
     }, 3000)
   }
 
-  async function handleGeneratedImage(url) {
+  async function handleGeneratedImage(url, jobId) {
     localStorage.setItem(RESULT_URL_KEY, url)
     state.petAvatarUrl = url
     // 방금 생성된 이미지를 반려동물 프로필 대표사진으로도 저장 — 아래에서
@@ -475,15 +477,21 @@
     await api('/api/chat/pets', { method: 'POST', body: JSON.stringify({ petId: state.petId, avatarUrl: url }) })
 
     // 사진을 그냥 던지지 않고, 반려동물이 곁들이는 짧은 한마디("어제 꿈에서
-    // 나왔던 장면이야" 같은)를 먼저 받아서 사진과 함께 보여준다.
-    const { ok, data } = await api('/api/chat/pets/' + state.petId + '/photo-caption', { method: 'POST' })
+    // 나왔던 장면이야" 같은)를 먼저 받아서 사진과 함께 보여준다. jobId를
+    // 같이 보내면 서버가 이미지 메시지도 대화 이력에 영구 저장해서, 채팅을
+    // 나갔다 다시 들어와도(새로고침 등) 썸네일이 사라지지 않는다.
+    const { ok, data } = await api('/api/chat/pets/' + state.petId + '/photo-caption', {
+      method: 'POST',
+      body: JSON.stringify({ jobId }),
+    })
     const caption = ok ? data.caption : null
 
     if (state.chatEntered) {
       if (caption) appendMessage('pet', caption)
-      appendPetImageMessage()
+      appendPetImageMessage(jobId)
     } else {
       state.pendingImageUrl = url
+      state.pendingImageJobId = jobId
       state.pendingImageCaption = caption
     }
   }
@@ -638,14 +646,22 @@
     chatMessagesEl.innerHTML = ''
 
     const { ok, data } = await api('/api/chat/pets/' + state.petId + '/greeting', { method: 'POST' })
-    if (ok) (data.messages || []).forEach((m) => appendMessage(m.role, m.content))
+    // generation_id가 있는 메시지는 텍스트가 아니라 그 job의 결과 이미지를
+    // 썸네일로 보여준다 — 채팅을 나갔다 다시 들어와도 사진이 재구성되는 이유.
+    if (ok) {
+      ;(data.messages || []).forEach((m) => {
+        if (m.generation_id) appendPetImageMessage(m.generation_id)
+        else appendMessage(m.role, m.content)
+      })
+    }
 
     // 채팅으로 넘어오기 전에 이미 사진 생성이 끝났다면(또는 실패했다면)
     // 여기서 바로 반영한다.
     if (state.pendingImageUrl) {
       if (state.pendingImageCaption) appendMessage('pet', state.pendingImageCaption)
-      appendPetImageMessage()
+      appendPetImageMessage(state.pendingImageJobId)
       state.pendingImageUrl = null
+      state.pendingImageJobId = null
       state.pendingImageCaption = null
     } else if (state.pendingGenerationError) {
       const errorMessage = typeof state.pendingGenerationError === 'string' ? state.pendingGenerationError : ''

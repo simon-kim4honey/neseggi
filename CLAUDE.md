@@ -116,6 +116,16 @@ lookbook-ai와 달리 `src/index.tsx`는 얇게 유지하고, 도메인별로 �
   기존 `generation_logs`에 반려동물 연결 + 수동(`manual`)/자동(`daily_memory`)
   구분 + 채팅에 알렸는지(`notified`) 추가. "오늘의 추억사진" 1일1회 체크에
   씀(같은 `pet_id`+`source='daily_memory'`로 오늘 날짜 row가 있는지 확인).
+- `generation_logs.prompt` (`migrations/0011`) — AtlasCloud에 실제로 전달된
+  프롬프트 전문. `/admin`에서 확인 가능(아래 참고).
+- `chat_messages.generation_id` (`migrations/0012`) — 채팅 속 사진 썸네일을
+  대화 이력에 영구 저장하기 위한 컬럼. `content`는 빈 문자열, `generation_id`가
+  어느 `generation_logs` job의 결과인지를 가리킴 — 클라이언트가 이 값이 있는
+  메시지는 텍스트 대신 `avatar-proxy?jobId=...`로 썸네일을 렌더링한다. 이
+  컬럼이 생기기 전엔 썸네일이 순전히 클라이언트 상태로만 표시돼서 채팅을
+  나갔다 다시 들어오면 사라지는 문제가 있었음(2026-09-10 수정) — 대화 상대
+  API(`/messages` POST가 Claude에 보내는 히스토리)는 `generation_id IS NULL`
+  조건으로 이 빈 텍스트 row들을 걸러낸다.
 
 ## "오늘의 추억사진" (1일1회 자동 생성, 2026-09-10 추가)
 
@@ -124,11 +134,9 @@ lookbook-ai와 달리 `src/index.tsx`는 얇게 유지하고, 도메인별로 �
 체크+시작+마무리를 다 겸함(멱등) — 오늘 시도가 없으면 사진 풀에서 랜덤으로
 한 장 + 랜덤 컨셉으로 새 생성을 시작하고, 이미 있으면 상태에 따라 폴링을
 유도하거나(processing) 완료된 걸 채팅에 한 번만 알린다(notified 플래그).
-크레딧을 차감하지 않는다(자동으로 주어지는 보너스 기능이라서). 채팅 메시지로는
-페르소나 캡션 텍스트만 대화 이력에 남고, 썸네일 이미지 자체는(다른 합성
-사진들처럼) 대화 이력에 재구성되지 않는다 — 같은 날 다시 채팅을 열면 캡션
-텍스트는 히스토리에 보이지만 썸네일은 그 세션에서 막 생성됐을 때만 보인다
-(알려진 한계, 이미지 메시지 타입을 따로 만들면 해결 가능하나 아직 안 함).
+크레딧을 차감하지 않는다(자동으로 주어지는 보너스 기능이라서). 채팅
+메시지로는 페르소나 캡션 텍스트 row + 이미지 메시지 row(`generation_id`)가
+같이 남아서, 나중에 채팅을 다시 열어도(새로고침 등) 썸네일이 재구성된다.
 
 어드민 전용 조회: `GET /api/admin/users/:userId/pets`(사진 풀 장수 포함),
 `GET /api/admin/pets/:petId/photos`(목록), `GET /api/admin/pets/:petId/photos/:photoId/image`

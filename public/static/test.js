@@ -208,6 +208,7 @@
   // ── 4. 채팅 ──
   const chatMessagesEl = document.getElementById('chat-messages')
   const chatHeroImage = document.getElementById('chat-hero-image')
+  const chatHeroImageWrap = document.getElementById('chat-hero-image-wrap')
   const chatInput = document.getElementById('chat-input')
   const chatSendBtn = document.getElementById('chat-send')
 
@@ -229,7 +230,7 @@
     if (resultUrl) {
       localStorage.setItem(RESULT_URL_KEY, resultUrl)
       chatHeroImage.src = resultUrl
-      chatHeroImage.classList.remove('hidden')
+      chatHeroImageWrap.classList.remove('hidden')
     }
     showStep('step-chat')
     chatMessagesEl.innerHTML = ''

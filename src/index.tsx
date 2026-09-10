@@ -110,8 +110,7 @@ app.get('/test', (c) => {
         </section>
 
         {/* 4. 채팅 */}
-        <section id="step-chat" class="step hidden space-y-3">
-          <img id="chat-hero-image" class="hidden w-full rounded-xl border" />
+        <section id="step-chat" class="step hidden space-y-3 pb-28">
           <div id="chat-messages" class="h-80 overflow-y-auto bg-gray-50 rounded p-3 space-y-2 text-sm"></div>
           <div class="flex gap-2">
             <input id="chat-input" type="text" placeholder="메시지 입력..." class="flex-1 border rounded px-3 py-2" />
@@ -120,6 +119,12 @@ app.get('/test', (c) => {
           <button id="restart" class="text-xs text-gray-400 underline">처음부터 다시 시작</button>
         </section>
       </div>
+
+      {/* 채팅 화면 하단에 고정으로 떠 있는 합성 이미지 */}
+      <div id="chat-hero-image-wrap" class="hidden fixed bottom-0 left-0 right-0 bg-white border-t shadow-lg p-2 flex justify-center z-10">
+        <img id="chat-hero-image" class="w-20 h-20 object-cover rounded-xl border" />
+      </div>
+
       <script src={`/static/test.js?v=${__BUILD_VERSION__}`} defer></script>
     </>
   )

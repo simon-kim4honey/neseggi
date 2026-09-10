@@ -49,6 +49,12 @@ const GUARDS = [
     why: '2026-09-10 사용자 피드백: "카메라 각도나 비율은 사람, 동물 비율에 맞춰라" — 이 문구가 사라지면 모델이 배경 사진의 원래 카메라 앵글을 그대로 고정해버려 인물/동물과 어색하게 안 맞는 합성이 다시 나올 수 있다.',
   },
   {
+    name: '사람·동물·배경 세 요소가 한 장의 사진처럼 자연스럽게 혼합',
+    must:
+      'blend seamlessly together — matching lighting direction, color temperature, shadows, and camera perspective across every element',
+    why: '2026-09-10 사용자 피드백: "사람, 동물, 배경 세가지가 모두 자연스럽게 혼합되어야하는것이 핵심이다" — 이 문구가 사라지면 비율은 맞아도 조명 방향/색온도/그림자/원근감이 서로 안 맞아 합성 티가 나는 결과가 나올 수 있다.',
+  },
+  {
     name: '배경 사진이 인물/동물 얼굴·생김새(정체성)에 영향 주지 않도록 제한',
     must: "their face, fur pattern, and other identifying features must stay exactly as shown in their source photo, regardless of Image",
     why: '2026-09-10 실사진 테스트에서 이 제약이 없을 때 배경 사진(넓은 실내 등) 때문에 반려동물 크기가 과도하게 커지고 보호자 얼굴이 바뀌는 문제가 실제로 발생함. (반려동물 단독 배경합성 케이스도 동일 위험이 있어 subject(s) 표현으로 일반화)',

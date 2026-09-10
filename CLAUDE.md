@@ -126,6 +126,24 @@ lookbook-ai와 달리 `src/index.tsx`는 얇게 유지하고, 도메인별로 �
   나갔다 다시 들어오면 사라지는 문제가 있었음(2026-09-10 수정) — 대화 상대
   API(`/messages` POST가 Claude에 보내는 히스토리)는 `generation_id IS NULL`
   조건으로 이 빈 텍스트 row들을 걸러낸다.
+- `chat_messages.image_kv_key` (`migrations/0013`) — 사용자가 채팅에 직접
+  첨부해서 보낸 사진. KV에 원본(data URL)을 영구 저장하고 D1엔 키만 기록
+  (pet_photos와 동일 패턴). `GET /pets/:petId/messages/:messageId/image`로
+  스트리밍.
+
+## 채팅 속 사진 (2026-09-10 추가)
+
+두 가지 방향의 사진이 채팅에 등장하고, 처리 방식이 다르다:
+- **반려동물 → 보호자**: 사진 합성/오늘의 추억사진 결과. `generation_id`로
+  연결, 실제 픽셀은 그때그때 AtlasCloud 결과 URL을 프록시로 스트리밍.
+- **보호자 → 반려동물**: `POST /pets/:petId/messages`에 `image`(data URL)를
+  같이 보내면, 반려동물이 **Claude 비전으로 그 턴에 한해서만** 실제로
+  "보고" 반응한다 — `buildPersonaSystemPrompt`에 사진을 보면 자연스럽게
+  알아보고 반응하라는 지시문 추가됨(단, 평소 하늘에서 지켜본다는 세계관과는
+  구분해서 서술 — "사진을 직접 보내면 그건 다르다"). 과거에 보낸 사진은
+  다음 턴부터 Claude에 다시 픽셀을 보내지 않고 "[사진을 보냈어]" 텍스트로만
+  대화 맥락에 남긴다(비용/복잡도 절약) — `image_kv_key`가 있는 과거 메시지는
+  `content`에 이 표시를 붙여서 히스토리에 넣는다.
 
 ## "오늘의 추억사진" (1일1회 자동 생성, 2026-09-10 추가)
 

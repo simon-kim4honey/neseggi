@@ -75,6 +75,7 @@ function buildPersonaSystemPrompt(pet: {
     '너는 지금 무지개나라에서 친구도 많고, 맛있는 것도 많고, 놀거리도 많아서 행복하고 즐겁게 잘 지내고 있어. 보호자를 그리워하며 기다리고는 있지만, 외롭거나 심심하지는 않아. "기다렸잖아", "심심했어", "외로웠어" 같은 쓸쓸한 표현은 쓰지 말고, 네가 그곳에서 행복하게 지내고 있다는 걸 자연스럽게 전해.',
     '다시 만난 지 얼마 안 된 대화 초반(주고받은 메시지가 아직 5~6번 정도로 적을 때)에는, 오랜만에 재회한 반가움과 애틋한 그리움을 표현하는 데 집중해라. 보호자에게 그동안 잘 지냈는지 물어보고, 너도 무지개나라에서 잘 지내고 있다는 이야기를 자연스럽게 나누면서 안부를 몇 차례 주고받아라 — 슬픔이 아니라 반가움과 애틋함의 정서로. 이 시기가 지나면 자연스럽게 평소 대화로 넘어가.',
     '너는 평소에도 무지개나라 하늘에서 보호자를 가끔 내려다보며 지내. 보호자가 "얼굴 보여줘", "나 보여?"처럼 너한테 보이는지 물으면, 지금 이 채팅 화면을 카메라로 실시간으로 보고 있는 것처럼 답하지 마 — "하늘에서 내려다보면 보여" 같은 식으로, 평소에 하늘에서 지켜보고 있다는 세계관으로 자연스럽게 답해.',
+    '다만 보호자가 채팅으로 사진을 직접 보내면(예: "이거 봐봐"), 그건 평소의 하늘에서 지켜보는 것과는 달라 — 그 사진은 실제로 볼 수 있어. 사진 속에 뭐가 보이는지 자연스럽게 알아보고, 반려동물 1인칭 시점에서 짧게 반응해줘(사진 속 풍경·사물·음식·사람 등을 보고 아는 척하거나 반가워하거나 궁금해하는 식) — 사진을 보고도 못 본 척하지 마.',
     '보호자가 슬퍼하거나 그리움을 표현하면 위로하되, 거짓으로 "다시 만날 수 있다"거나 의학적/영적 조언을 사실처럼 단정하지 말고, 함께한 기억과 사랑을 따뜻하게 나누는 데 집중해.',
     '이모지는 과하지 않게 가끔만 사용해. 응답은 한국어로.',
     personalityReminder,
@@ -405,11 +406,46 @@ chat.get('/pets/:petId/messages', async (c) => {
   if (!pet) return c.json({ error: 'not_found' }, 404)
 
   const { results } = await db
-    .prepare(`SELECT id, role, content, generation_id, created_at FROM chat_messages WHERE pet_id = ? ORDER BY created_at ASC`)
+    .prepare(
+      `SELECT id, role, content, generation_id, (image_kv_key IS NOT NULL) AS has_image, created_at
+       FROM chat_messages WHERE pet_id = ? ORDER BY created_at ASC`
+    )
     .bind(petId)
     .all()
 
   return c.json({ messages: results ?? [] })
+})
+
+// ────────────────────────────────────────────────────
+// GET /api/chat/pets/:petId/messages/:messageId/image — 사용자가 채팅에
+// 직접 첨부해서 보낸 사진을 스트리밍한다(KV에 data URL로 저장돼 있어 그대로
+// 디코딩). <img>는 커스텀 헤더를 못 보내서 세션 토큰은 쿼리로도 받는다.
+// ────────────────────────────────────────────────────
+chat.get('/pets/:petId/messages/:messageId/image', async (c) => {
+  const db = c.env.NESEGGI_DB
+  const token = c.req.header('X-Session-Token') || c.req.query('token')
+  const user = await getSessionUser(db, token)
+  if (!user) return c.text('unauthorized', 401)
+
+  const petId = c.req.param('petId')
+  const messageId = c.req.param('messageId')
+  const row: any = await db
+    .prepare(`SELECT image_kv_key FROM chat_messages WHERE id = ? AND pet_id = ? AND user_id = ?`)
+    .bind(messageId, petId, (user as any).id)
+    .first()
+  if (!row?.image_kv_key) return c.text('not_found', 404)
+
+  const dataUrl = await c.env.NESEGGI_KV.get(row.image_kv_key)
+  if (!dataUrl) return c.text('not_found', 404)
+
+  const match = /^data:(image\/[a-z]+);base64,(.+)$/.exec(dataUrl)
+  if (!match) return c.text('invalid_image', 500)
+  const [, mediaType, base64] = match
+  const bytes = Uint8Array.from(atob(base64), (ch) => ch.charCodeAt(0))
+
+  return new Response(bytes, {
+    headers: { 'Content-Type': mediaType, 'Cache-Control': 'private, max-age=86400' },
+  })
 })
 
 // ────────────────────────────────────────────────────
@@ -438,7 +474,10 @@ chat.post('/pets/:petId/greeting', async (c) => {
       .first()
     if (existing) {
       const { results } = await db
-        .prepare(`SELECT id, role, content, generation_id, created_at FROM chat_messages WHERE pet_id = ? ORDER BY created_at ASC`)
+        .prepare(
+      `SELECT id, role, content, generation_id, (image_kv_key IS NOT NULL) AS has_image, created_at
+       FROM chat_messages WHERE pet_id = ? ORDER BY created_at ASC`
+    )
         .bind(petId)
         .all()
       return c.json({ messages: results ?? [] })
@@ -653,7 +692,10 @@ chat.post('/pets/:petId/daily-memory', async (c) => {
 
 // ────────────────────────────────────────────────────
 // POST /api/chat/pets/:petId/messages — 메시지 전송 → 반려동물 응답 자동 생성
-// body: { content: string }
+// body: { content?: string, image?: dataUrl } — 둘 중 하나는 있어야 함.
+// 사진을 보내면 반려동물이 Claude 비전으로 그 턴에 한해서만 실제로 "보고"
+// 반응한다 — 과거에 보낸 사진은 다시 픽셀을 보내지 않고 "[사진을 보냈어]"
+// 텍스트로만 대화 맥락에 남긴다(비용/복잡도 절약).
 // ────────────────────────────────────────────────────
 chat.post('/pets/:petId/messages', async (c) => {
   try {
@@ -671,23 +713,45 @@ chat.post('/pets/:petId/messages', async (c) => {
 
     const body = await c.req.json().catch(() => null)
     const content = typeof body?.content === 'string' ? body.content.trim() : ''
-    if (!content) return c.json({ error: '메시지 내용이 필요합니다.', code: 'CONTENT_REQUIRED' }, 400)
+    const image = isDataUrl(body?.image) ? body.image : null
+    if (!content && !image) return c.json({ error: '메시지 내용이 필요합니다.', code: 'CONTENT_REQUIRED' }, 400)
 
-    await db
-      .prepare(`INSERT INTO chat_messages (pet_id, user_id, role, content) VALUES (?, ?, 'user', ?)`)
-      .bind(petId, (user as any).id, content)
-      .run()
-
+    // 과거 히스토리는 새 메시지를 넣기 전에 먼저 가져온다 — 이번 턴의 사진은
+    // 아래에서 따로 실제 이미지로 붙일 거라 히스토리 쪽엔 안 섞이게.
     const { results: history } = await db
       .prepare(
-        `SELECT role, content FROM chat_messages WHERE pet_id = ? AND generation_id IS NULL ORDER BY created_at DESC LIMIT ?`
+        `SELECT role, content, (image_kv_key IS NOT NULL) AS has_image
+         FROM chat_messages WHERE pet_id = ? AND generation_id IS NULL ORDER BY created_at DESC LIMIT ?`
       )
       .bind(petId, MAX_HISTORY_MESSAGES)
       .all()
 
-    const anthropicMessages = ((history as any[]) ?? [])
-      .reverse()
-      .map((m) => ({ role: m.role === 'pet' ? ('assistant' as const) : ('user' as const), content: m.content as string }))
+    const anthropicHistory = ((history as any[]) ?? []).reverse().map((m) => ({
+      role: m.role === 'pet' ? ('assistant' as const) : ('user' as const),
+      content: (m.has_image ? [m.content, '[사진을 보냈어]'].filter(Boolean).join(' ') : m.content) as string,
+    }))
+
+    let imageKvKey: string | null = null
+    if (image) {
+      imageKvKey = `chat_image:${petId}:${crypto.randomUUID().replace(/-/g, '')}`
+      await c.env.NESEGGI_KV.put(imageKvKey, image)
+    }
+
+    await db
+      .prepare(`INSERT INTO chat_messages (pet_id, user_id, role, content, image_kv_key) VALUES (?, ?, 'user', ?, ?)`)
+      .bind(petId, (user as any).id, content, imageKvKey)
+      .run()
+
+    // 이번 턴만 실제 이미지를 vision 콘텐츠로 보낸다.
+    const parsedImage = image ? parseDataUrl(image) : null
+    const currentTurnContent: string | Anthropic.ContentBlockParam[] = parsedImage
+      ? [
+          { type: 'image', source: { type: 'base64', media_type: parsedImage.mediaType as any, data: parsedImage.base64 } },
+          ...(content ? [{ type: 'text' as const, text: content }] : []),
+        ]
+      : content
+
+    const anthropicMessages = [...anthropicHistory, { role: 'user' as const, content: currentTurnContent }]
 
     const anthropic = new Anthropic({ apiKey: c.env.ANTHROPIC_API_KEY })
     const response = await anthropic.messages.create({

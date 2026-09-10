@@ -192,10 +192,21 @@ app.get('/test', (c) => {
             <div id="chat-messages" class="p-3 space-y-2 text-sm"></div>
           </div>
           {/* 입력창은 화면(뷰포트) 가장 아래에 고정 — 스크롤을 해도 항상
-              같은 자리에 보이도록 position: fixed(style.css의 .chat-input-bar). */}
-          <div class="chat-input-bar flex gap-2">
-            <input id="chat-input" type="text" placeholder="메시지 입력..." class="input-field flex-1" />
-            <button id="chat-send" class="btn-primary">보내기</button>
+              같은 자리에 보이도록 position: fixed(style.css의 .chat-input-bar).
+              사진을 첨부하면 보내기 전에 작은 미리보기가 그 위에 뜬다. */}
+          <div class="chat-input-bar space-y-2">
+            <div id="chat-image-preview" class="hidden flex items-center gap-2">
+              <img id="chat-image-preview-img" class="w-12 h-12 object-cover rounded-lg border" />
+              <button id="chat-image-remove" class="text-xs text-red-500 underline">사진 제거</button>
+            </div>
+            <div class="flex gap-2 items-center">
+              <input id="chat-image-input" type="file" accept="image/*" class="hidden" />
+              <button id="chat-image-btn" type="button" class="btn-secondary px-3 flex-shrink-0" aria-label="사진 첨부">
+                📷
+              </button>
+              <input id="chat-input" type="text" placeholder="메시지 입력..." class="input-field flex-1" />
+              <button id="chat-send" class="btn-primary flex-shrink-0">보내기</button>
+            </div>
           </div>
         </section>
 

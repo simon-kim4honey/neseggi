@@ -51,6 +51,13 @@
     return url
   }
 
+  // 사용자가 채팅에 직접 첨부해서 보낸 사진(과거 기록)을 보여줄 때 쓴다.
+  function messageImageProxyUrl(petId, messageId) {
+    return (
+      '/api/chat/pets/' + petId + '/messages/' + messageId + '/image?token=' + encodeURIComponent(getToken() || '')
+    )
+  }
+
   function fileToDataUrl(file) {
     return new Promise((resolve, reject) => {
       if (!file) return resolve(null)
@@ -587,14 +594,7 @@
 
   function appendMessage(role, content) {
     if (role !== 'pet') {
-      const div = document.createElement('div')
-      div.className = 'text-right'
-      const bubble = document.createElement('span')
-      bubble.className = 'bubble-user inline-block max-w-[80%]'
-      bubble.textContent = content
-      div.appendChild(bubble)
-      chatMessagesEl.appendChild(div)
-      chatScrollEl.scrollTop = chatScrollEl.scrollHeight
+      appendUserMessage(content, null)
       return
     }
 
@@ -602,6 +602,35 @@
     bubble.className = 'bubble-pet inline-block max-w-[80%]'
     bubble.textContent = content
     chatMessagesEl.appendChild(makePetMessageRow(bubble))
+    chatScrollEl.scrollTop = chatScrollEl.scrollHeight
+  }
+
+  // 사용자가 보낸 메시지 — 사진을 첨부했으면 텍스트 위에 작은 썸네일도
+  // 같이 보여준다(클릭하면 라이트박스로 확대). imageUrl은 방금 고른 파일의
+  // data URL(실시간 전송 직후) 또는 과거 기록이면 message-image 프록시 URL.
+  function appendUserMessage(content, imageUrl) {
+    const div = document.createElement('div')
+    div.className = 'text-right space-y-1'
+    if (imageUrl) {
+      const imgSizePx = Math.max(72, Math.round(chatMessagesEl.clientWidth * 0.3))
+      const img = document.createElement('img')
+      img.className = 'inline-block rounded-xl border cursor-pointer object-cover'
+      img.style.width = imgSizePx + 'px'
+      img.style.height = imgSizePx + 'px'
+      img.alt = '보낸 사진'
+      img.addEventListener('click', () => openLightbox(imageUrl))
+      img.addEventListener('error', () => img.remove(), { once: true })
+      img.src = imageUrl
+      div.appendChild(img)
+    }
+    if (content) {
+      if (imageUrl) div.appendChild(document.createElement('br'))
+      const bubble = document.createElement('span')
+      bubble.className = 'bubble-user inline-block max-w-[80%]'
+      bubble.textContent = content
+      div.appendChild(bubble)
+    }
+    chatMessagesEl.appendChild(div)
     chatScrollEl.scrollTop = chatScrollEl.scrollHeight
   }
 
@@ -676,9 +705,11 @@
     const { ok, data } = await api('/api/chat/pets/' + state.petId + '/greeting', { method: 'POST' })
     // generation_id가 있는 메시지는 텍스트가 아니라 그 job의 결과 이미지를
     // 썸네일로 보여준다 — 채팅을 나갔다 다시 들어와도 사진이 재구성되는 이유.
+    // has_image는 사용자가 직접 첨부해서 보낸 사진(message-image 프록시).
     if (ok) {
       ;(data.messages || []).forEach((m) => {
         if (m.generation_id) appendPetImageMessage(m.generation_id)
+        else if (m.has_image) appendUserMessage(m.content, messageImageProxyUrl(state.petId, m.id))
         else appendMessage(m.role, m.content)
       })
     }
@@ -728,20 +759,47 @@
     }, 3000)
   }
 
+  // ── 채팅에 사진 첨부하기 — 반려동물이 Claude 비전으로 실제로 보고 반응함 ──
+  const chatImageBtn = document.getElementById('chat-image-btn')
+  const chatImageInput = document.getElementById('chat-image-input')
+  const chatImagePreview = document.getElementById('chat-image-preview')
+  const chatImagePreviewImg = document.getElementById('chat-image-preview-img')
+  const chatImageRemove = document.getElementById('chat-image-remove')
+  let pendingChatImage = null
+
+  function clearPendingChatImage() {
+    pendingChatImage = null
+    chatImageInput.value = ''
+    chatImagePreview.classList.add('hidden')
+    chatImagePreviewImg.src = ''
+  }
+  chatImageBtn.addEventListener('click', () => chatImageInput.click())
+  chatImageInput.addEventListener('change', async () => {
+    const file = chatImageInput.files[0]
+    if (!file) return
+    pendingChatImage = await normalizeImageFile(file)
+    chatImagePreviewImg.src = pendingChatImage
+    chatImagePreview.classList.remove('hidden')
+  })
+  chatImageRemove.addEventListener('click', clearPendingChatImage)
+
   let sending = false
   async function sendChat() {
     if (sending) return // 한 번에 하나의 메시지만 — 중복 전송 방지
     const content = chatInput.value.trim()
-    if (!content) return
+    const image = pendingChatImage
+    if (!content && !image) return
     sending = true
     chatSendBtn.disabled = true
     chatInput.disabled = true
+    chatImageBtn.disabled = true
     chatInput.value = ''
-    appendMessage('user', content)
+    clearPendingChatImage()
+    appendUserMessage(content, image)
     try {
       const { ok, data } = await api('/api/chat/pets/' + state.petId + '/messages', {
         method: 'POST',
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, image }),
       })
       if (!ok) {
         appendMessage('pet', '[오류] ' + (data.error || '응답 실패'))
@@ -752,6 +810,7 @@
       sending = false
       chatSendBtn.disabled = false
       chatInput.disabled = false
+      chatImageBtn.disabled = false
       chatInput.focus()
     }
   }

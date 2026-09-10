@@ -124,6 +124,10 @@ app.get('/test', (c) => {
           <div class="loading-paw">🐾</div>
           <p class="text-lg font-medium">무지개 나라에서 우리 아이를 부르고 있어요..</p>
           <p id="gen-status-text" class="text-sm text-gray-400"></p>
+          {/* AtlasCloud 응답 지연/타임아웃으로 생성 시작 자체가 실패하면 이
+              버튼만 보여준다 — 실패해도 재시도할 방법이 없어 막다른 화면에
+              갇히는 문제가 있었음 */}
+          <button id="gen-retry" class="btn-primary hidden">다시 시도하기</button>
         </section>
 
         {/* 4. 채팅 */}

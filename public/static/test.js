@@ -268,10 +268,12 @@
   // 벌 수 있어서 AtlasCloud 응답이 늦어져도 체감 대기시간이 줄어든다.
   const GENERATING_SCREEN_MS = 7000
   const genStatusText = document.getElementById('gen-status-text')
+  const genRetryBtn = document.getElementById('gen-retry')
 
   async function startGeneration() {
     showStep('step-generating')
     genStatusText.textContent = ''
+    genRetryBtn.classList.add('hidden')
     state.chatEntered = false
     state.pendingImageUrl = null
     state.pendingGenerationError = null
@@ -294,12 +296,16 @@
       body: JSON.stringify(body),
     })
     if (!ok) {
+      // AtlasCloud 응답 지연 등으로 생성 시작 자체가 실패하는 경우가
+      // 간헐적으로 있음 — 막다른 화면에 갇히지 않도록 재시도 버튼을 보여준다.
       genStatusText.textContent = '오류: ' + (data.error || '생성 시작 실패')
+      genRetryBtn.classList.remove('hidden')
       return
     }
     pollGenerationInBackground(data.jobId)
     setTimeout(() => enterChat(), GENERATING_SCREEN_MS)
   }
+  genRetryBtn.addEventListener('click', startGeneration)
 
   function pollGenerationInBackground(jobId) {
     const interval = setInterval(async () => {

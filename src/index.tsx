@@ -130,6 +130,10 @@ app.get('/test', (c) => {
         <section id="step-chat" class="step step-inner hidden space-y-3" data-group="chat">
           <div id="chat-messages" class="h-80 overflow-y-auto p-3 space-y-2 text-sm"></div>
           <img id="chat-hero-image" class="hidden hero-image" />
+          <div id="chat-hero-image-fallback" class="hidden hero-image-fallback">
+            <span>🐾</span>
+            <p>사진을 불러오지 못했어요</p>
+          </div>
           <div class="flex gap-2">
             <input id="chat-input" type="text" placeholder="메시지 입력..." class="input-field flex-1" />
             <button id="chat-send" class="btn-primary">보내기</button>

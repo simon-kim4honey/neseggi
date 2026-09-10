@@ -38,10 +38,15 @@ const GUARDS = [
     why: '보호자 사진이 포함된 합성에서 이 문구가 사라지면 실제 보호자와 다른 사람 얼굴이 나올 수 있다.',
   },
   {
-    name: '배경 사진은 장소 레퍼런스로만 사용 (인물/동물 복제 금지)',
+    name: '배경 사진은 장소 느낌 레퍼런스로만 사용 (100% 동일 재현 금지)',
     must:
-      "ONLY as a reference for the location's architecture, furniture, colors, lighting, and atmosphere. Recreate a similar-looking setting behind the subject(s).",
-    why: '이 문구가 사라지면 사용자가 올린 배경 사진(집 등)에 찍혀있던 다른 사람이나 동물이 결과물에 그대로 나타날 수 있다.',
+      "only as a loose reference for the location's overall feel — general architecture style, furniture, colors, lighting, and atmosphere. The background does NOT need to match Image",
+    why: '2026-09-10 배경사진 업로드 테스트에서 사용자가 "배경이 업로드 사진과 100% 동일할 필요는 없다"고 명확히 요구함 — 이 문구가 사라지면 모델이 배경 사진을 그대로 복제하려다 원본에 찍혀있던 다른 사람/동물까지 결과물에 나타날 위험이 다시 생긴다.',
+  },
+  {
+    name: '카메라 각도/구도는 배경 원본이 아니라 인물·동물 비율에 맞춘다',
+    must: 'choose whatever camera angle, framing, and room proportions naturally fit',
+    why: '2026-09-10 사용자 피드백: "카메라 각도나 비율은 사람, 동물 비율에 맞춰라" — 이 문구가 사라지면 모델이 배경 사진의 원래 카메라 앵글을 그대로 고정해버려 인물/동물과 어색하게 안 맞는 합성이 다시 나올 수 있다.',
   },
   {
     name: '배경 사진이 인물/동물 얼굴·생김새(정체성)에 영향 주지 않도록 제한',

@@ -276,22 +276,61 @@
   // ── 4. 채팅 ──
   const chatMessagesEl = document.getElementById('chat-messages')
   const chatHeroImage = document.getElementById('chat-hero-image')
+  const chatHeroImageFallback = document.getElementById('chat-hero-image-fallback')
   const chatInput = document.getElementById('chat-input')
   const chatSendBtn = document.getElementById('chat-send')
 
   // AtlasCloud가 "완료" 상태를 반환한 직후에도 실제 파일이 CDN에 아직 다
   // 준비되지 않아 깨진 이미지로 뜨는 경우가 있었음 — 로드 실패 시 캐시를
-  // 우회해서 잠깐 텀을 두고 재시도한다.
+  // 우회해서 잠깐 텀을 두고 재시도한다. 재시도를 다 써도 실패하면(예: 캐시에
+  // 남아있던 예전 URL이 만료된 경우) 빈 화면 대신 안내 문구를 보여준다.
   function setHeroImage(url, attempt) {
+    if (!url) {
+      chatHeroImage.classList.add('hidden')
+      chatHeroImageFallback.classList.remove('hidden')
+      return
+    }
     attempt = attempt || 0
     const bust = url + (url.includes('?') ? '&' : '?') + '_retry=' + attempt
+    chatHeroImageFallback.classList.add('hidden')
     chatHeroImage.onerror = () => {
-      if (attempt < 5) setTimeout(() => setHeroImage(url, attempt + 1), 2000)
+      if (attempt < 5) {
+        setTimeout(() => setHeroImage(url, attempt + 1), 2000)
+      } else {
+        chatHeroImage.classList.add('hidden')
+        chatHeroImageFallback.classList.remove('hidden')
+      }
     }
     chatHeroImage.onload = () => {
+      chatHeroImageFallback.classList.add('hidden')
       chatHeroImage.classList.remove('hidden')
     }
     chatHeroImage.src = attempt === 0 ? url : bust
+  }
+
+  // 프로필 이미지 URL이 없거나(캐시된 예전 URL 만료 등) 로드에 실패하면
+  // 깨진 이미지 아이콘 대신 발바닥 이모지 아바타로 대체한다.
+  function makeAvatarEl() {
+    if (!state.petAvatarUrl) {
+      const fallback = document.createElement('div')
+      fallback.className = 'avatar-fallback'
+      fallback.textContent = '🐾'
+      return fallback
+    }
+    const avatar = document.createElement('img')
+    avatar.className = 'w-8 h-8 rounded-full object-cover border flex-shrink-0'
+    avatar.src = state.petAvatarUrl
+    avatar.addEventListener(
+      'error',
+      () => {
+        const fallback = document.createElement('div')
+        fallback.className = 'avatar-fallback'
+        fallback.textContent = '🐾'
+        avatar.replaceWith(fallback)
+      },
+      { once: true }
+    )
+    return avatar
   }
 
   // 카카오톡처럼 반려동물 메시지는 위에 프로필 사진+이름을 붙여서 보여준다
@@ -313,11 +352,7 @@
     const row = document.createElement('div')
     row.className = 'flex items-start gap-2'
 
-    const avatar = document.createElement('img')
-    avatar.className = 'w-8 h-8 rounded-full object-cover border flex-shrink-0'
-    avatar.src = state.petAvatarUrl || ''
-    if (!state.petAvatarUrl) avatar.classList.add('invisible')
-    row.appendChild(avatar)
+    row.appendChild(makeAvatarEl())
 
     const col = document.createElement('div')
     const nameEl = document.createElement('div')
@@ -339,7 +374,6 @@
     if (resultUrl) {
       localStorage.setItem(RESULT_URL_KEY, resultUrl)
       state.petAvatarUrl = resultUrl
-      setHeroImage(resultUrl)
       // 방금 생성된 이미지를 반려동물 프로필 대표사진으로도 저장
       api('/api/chat/pets', { method: 'POST', body: JSON.stringify({ petId: state.petId, avatarUrl: resultUrl }) })
     }
@@ -351,6 +385,9 @@
         state.petAvatarUrl = state.petAvatarUrl || pet.avatar_url
       }
     }
+    // 캐시된 URL이 만료됐을 수도 있으니 항상 다시 시도 — 실패하면
+    // setHeroImage가 재시도 후 안내 문구로 대체한다.
+    setHeroImage(state.petAvatarUrl)
     showStep('step-chat')
     chatMessagesEl.innerHTML = ''
 

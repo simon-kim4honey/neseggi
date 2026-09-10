@@ -716,6 +716,22 @@ chat.post('/pets/:petId/daily-memory', async (c) => {
       return c.json({ status: today.status, jobId: today.id, resultReady: false })
     }
 
+    // 오늘 daily_memory 시도가 아직 없더라도, 오늘 이미 수동 합성(manual —
+    // 온보딩 프로필 사진 등)이 완료됐다면 그걸 오늘의 몫으로 치고 새로
+    // 만들지 않는다. 그렇지 않으면 가입 첫날 온보딩 합성 사진 + 오늘의
+    // 추억사진이 각각 따로 생성돼 하루에 사진이 2장 나오게 된다.
+    const todayManual = await db
+      .prepare(
+        `SELECT id FROM generation_logs
+         WHERE pet_id = ? AND source = 'manual' AND status = 'done' AND date(created_at) = date('now')
+         LIMIT 1`
+      )
+      .bind(petId)
+      .first()
+    if (todayManual) {
+      return c.json({ status: 'covered_by_manual' })
+    }
+
     const picked = await pickRandomPetPhoto(db, c.env.NESEGGI_KV, petId, (user as any).id)
     if (!picked) return c.json({ status: 'no_photos' })
 

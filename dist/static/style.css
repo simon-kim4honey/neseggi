@@ -174,50 +174,62 @@ body {
   border-radius: 18px;
 }
 
-/* 메시지 입력창을 뷰포트 가장 아래에 고정 — #test-app이 max-w-md로 가운데
-   정렬돼 있으니, 입력창도 같은 최대 너비로 화면 중앙에 고정해서 카드와
-   나란히 붙어 보이게 한다. */
-.chat-input-bar {
-  position: fixed;
-  left: 50%;
-  bottom: 0;
-  transform: translateX(-50%);
-  width: 100%;
-  max-width: 28rem; /* Tailwind max-w-md */
-  box-sizing: border-box;
-  padding: 12px 22px calc(12px + env(safe-area-inset-bottom));
-  background: #fff;
-  border-top: 1.5px solid #f2dde4;
-  box-shadow: 0 -6px 20px rgba(232, 85, 133, 0.1);
-  z-index: 30;
-}
-
-/* 채팅 상단바(프로필 사진+이름 / 메뉴 버튼)를 뷰포트 최상단에 고정 —
-   .chat-input-bar와 같은 방식으로 #test-app과 같은 최대 너비로 중앙 고정. */
-.chat-header-bar {
+/* 채팅 화면(#step-chat) — 상단바/메시지목록/입력창을 하나의 flex column으로
+   묶어서 뷰포트에 정확히 꽉 채운다. #test-app이 max-w-md로 가운데 정렬돼
+   있으니 이 화면도 같은 최대 너비로 화면 중앙에 고정한다.
+   100dvh(동적 뷰포트 높이)를 쓰면 모바일 브라우저 주소창이 스크롤에 따라
+   보였다 숨었다 하며 실제 보이는 높이가 바뀌어도 자동으로 따라간다 — 이전엔
+   JS로 헤더/입력창의 실제 좌표를 매번 재서 메시지 영역 높이를 px로
+   계산했는데, 주소창 표시/숨김 타이밍에 따라 계산이 어긋나 메시지 하단이
+   살짝 잘리고도 더 스크롤이 안 되는 문제가 있었다(2026-09-10). dvh를
+   지원하지 않는 아주 오래된 브라우저를 위해 100vh를 먼저 선언해 fallback으로
+   둔다. `.hidden`(다른 step과 전환할 때 JS가 토글)보다 이 규칙이 항상 이기면
+   숨겨야 할 때도 화면을 덮어버리므로, `:not(.hidden)`으로 보일 때만
+   적용되게 한다. */
+#step-chat.chat-screen:not(.hidden) {
   position: fixed;
   left: 50%;
   top: 0;
   transform: translateX(-50%);
   width: 100%;
   max-width: 28rem; /* Tailwind max-w-md */
+  height: 100vh;
+  height: 100dvh;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  z-index: 20;
+}
+
+.chat-header-bar {
+  flex-shrink: 0;
   box-sizing: border-box;
   padding: 14px 22px;
   padding-top: calc(14px + env(safe-area-inset-top));
-  background: #fff;
   border-bottom: 1.5px solid #f2dde4;
   box-shadow: 0 6px 20px rgba(232, 85, 133, 0.08);
-  z-index: 30;
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
-/* 상단에 .chat-header-bar가 고정되면서 가려지는 만큼 채팅 화면 콘텐츠에
-   여백을 준다 — #test-app .step-inner보다 나중에 나와야 동일 우선순위에서
-   이 규칙이 이긴다. */
-#step-chat.step-inner {
-  padding-top: 84px;
+#chat-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 12px 22px;
+}
+
+.chat-input-bar {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 12px 22px calc(12px + env(safe-area-inset-bottom));
+  border-top: 1.5px solid #f2dde4;
+  box-shadow: 0 -6px 20px rgba(232, 85, 133, 0.1);
 }
 
 /* 채팅 속 합성 사진 썸네일 — 채팅창 폭의 30%, 클릭하면 라이트박스로 확대 */

@@ -147,7 +147,7 @@ app.get('/test', (c) => {
         </section>
 
         {/* 4. 채팅 */}
-        <section id="step-chat" class="step step-inner hidden space-y-3" data-group="chat">
+        <section id="step-chat" class="step step-inner hidden chat-screen" data-group="chat">
           {/* 카카오톡처럼 상단바(프로필 사진+이름 / 메뉴 버튼)를 두고, 앞으로
               추가되는 기능들은 계속 이 메뉴 안에 넣는다. */}
           <div class="chat-header-bar">
@@ -177,17 +177,21 @@ app.get('/test', (c) => {
             </div>
           </div>
 
-          {/* 메시지 영역 높이는 고정값이 아니라 JS(syncChatScrollHeight)가
-              상단바 바로 아래 ~ 입력창 바로 위 사이의 실제 빈 공간에 맞춰
-              매번 계산해서 채운다 — 화면 크기와 무관하게 항상 입력창에 딱
-              붙어 보이게 하려는 목적. 합성된 사진은 별도 큰 이미지가 아니라
-              반려동물 메시지의 썸네일로 온다. */}
-          <div id="chat-scroll" class="overflow-y-auto space-y-3 pr-1">
-            <div id="chat-messages" class="p-3 space-y-2 text-sm"></div>
+          {/* chat-screen(#step-chat)이 뷰포트 높이(100dvh)에 꽉 차는 flex
+              column이고, 상단바/입력창은 flex-shrink:0인 고정폭 자식이라,
+              가운데 이 메시지 영역만 flex:1로 남는 공간을 그대로 채운다 —
+              모바일 브라우저 주소창이 스크롤에 따라 보였다 숨었다 하며 실제
+              보이는 높이가 바뀌어도 dvh가 자동으로 따라가므로, 예전처럼 JS로
+              헤더/입력창 좌표를 매번 재서 높이를 계산할 필요가 없다(그
+              방식은 계산 타이밍이 어긋나면 메시지가 살짝 잘리고 더 스크롤도
+              안 되는 문제가 있었음, 2026-09-10). 합성된 사진은 별도 큰
+              이미지가 아니라 반려동물 메시지의 썸네일로 온다. */}
+          <div id="chat-scroll" class="space-y-3">
+            <div id="chat-messages" class="space-y-2 text-sm"></div>
           </div>
-          {/* 입력창은 화면(뷰포트) 가장 아래에 고정 — 스크롤을 해도 항상
-              같은 자리에 보이도록 position: fixed(style.css의 .chat-input-bar).
-              사진을 첨부하면 보내기 전에 작은 미리보기가 그 위에 뜬다. */}
+          {/* 입력창은 채팅 화면 flex column의 맨 아래 칸(flex-shrink:0) —
+              항상 화면 가장 아래에 붙어 보인다. 사진을 첨부하면 보내기 전에
+              작은 미리보기가 그 위에 뜬다. */}
           <div class="chat-input-bar space-y-2">
             <div id="chat-image-preview" class="hidden flex items-center gap-2">
               <img id="chat-image-preview-img" class="w-12 h-12 object-cover rounded-lg border" />

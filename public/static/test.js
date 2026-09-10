@@ -81,7 +81,11 @@
       return
     }
     const photoFile = document.getElementById('pet-photo').files[0]
-    if (photoFile) state.petPhoto = await fileToDataUrl(photoFile)
+    if (!photoFile) {
+      alert('반려동물 사진을 선택해주세요.')
+      return
+    }
+    state.petPhoto = await fileToDataUrl(photoFile)
 
     const species = document.getElementById('pet-species').value.trim()
     const personality = document.getElementById('pet-personality').value.trim()
@@ -168,8 +172,10 @@
     genStatusText.textContent = ''
 
     if (!state.petPhoto) {
-      // 반려동물 사진이 없으면 합성을 건너뛰고 바로 채팅으로
-      enterChat(null)
+      // 정상 흐름이면 1단계에서 이미 필수로 막혀서 여기 도달할 수 없다 —
+      // 혹시라도 상태가 꼬였을 때 조용히 건너뛰지 않고 명확히 되돌린다.
+      alert('반려동물 사진이 없어서 합성을 진행할 수 없어요. 처음부터 다시 시작해주세요.')
+      showStep('step-pet')
       return
     }
 

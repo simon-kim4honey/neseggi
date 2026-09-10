@@ -825,13 +825,15 @@
     document.getElementById('profile-provider').textContent = user ? user.provider || 'email' : '-'
   }
   document.getElementById('profile-back').addEventListener('click', () => showStep('step-chat'))
-  document.getElementById('profile-logout').addEventListener('click', async () => {
+  document.getElementById('profile-restart').addEventListener('click', restartFromScratch)
+
+  async function logout() {
     await api('/api/auth/logout', { method: 'POST' })
     setToken(null)
     localStorage.removeItem(PET_ID_KEY)
     localStorage.removeItem(RESULT_URL_KEY)
     location.reload()
-  })
+  }
 
   document.getElementById('menu-profile').addEventListener('click', () => {
     closeChatMenu()
@@ -841,9 +843,9 @@
     closeChatMenu()
     openPhotoAlbum()
   })
-  document.getElementById('menu-restart').addEventListener('click', () => {
+  document.getElementById('menu-logout').addEventListener('click', () => {
     closeChatMenu()
-    restartFromScratch()
+    logout()
   })
 
   // ── 시작 ──

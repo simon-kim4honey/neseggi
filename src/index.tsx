@@ -178,8 +178,8 @@ app.get('/test', (c) => {
                   사진첩
                 </button>
                 <div class="border-t border-gray-100 my-1"></div>
-                <button id="menu-restart" class="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50">
-                  처음부터 다시 시작
+                <button id="menu-logout" class="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50">
+                  로그아웃
                 </button>
               </div>
             </div>
@@ -231,7 +231,7 @@ app.get('/test', (c) => {
               <span id="profile-provider"></span>
             </div>
           </div>
-          <button id="profile-logout" class="btn-secondary w-full">로그아웃</button>
+          <button id="profile-restart" class="btn-secondary w-full">처음부터 다시 시작</button>
         </section>
       </div>
 

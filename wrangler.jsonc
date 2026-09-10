@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "petlook",
+  "compatibility_date": "2026-07-10",
+  "pages_build_output_dir": "./dist",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "d1_databases": [
+    {
+      "binding": "PETLOOK_DB",
+      "database_name": "petlook-staging",
+      "database_id": "REPLACE_WITH_STAGING_D1_ID",
+      "preview_database_id": "REPLACE_WITH_STAGING_D1_PREVIEW_ID"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "PETLOOK_KV",
+      "id": "REPLACE_WITH_STAGING_KV_ID",
+      "preview_id": "REPLACE_WITH_STAGING_KV_PREVIEW_ID"
+    }
+  ],
+  "vars": {
+    "GA4_MEASUREMENT_ID": "REPLACE_WITH_GA4_ID"
+  }
+}

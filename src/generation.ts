@@ -175,7 +175,12 @@ function extractOutputUrl(pollRes: any): string | null {
 
 // AtlasCloud "생성 시작" 요청 1회 전송 — /start 핸들러에서 직접 await한다
 // (waitUntil 백그라운드 아님). 전체 이미지 생성 완료까지 기다리는 게 아니라
-// job이 정상 접수됐다는 응답만 기다리는 거라 보통 1초 안팎으로 끝난다.
+// job이 정상 접수됐다는 응답만 기다리는 거라 보통은 1초 안팎으로 끝나지만,
+// AtlasCloud가 간헐적으로 이 응답 자체를 느리게 줄 때가 있어서(2026-09-10
+// 반복 확인) 타임아웃을 25초 → 3분으로 늘림. 클라이언트가 이 요청 응답을
+// 기다리는 동안 로딩 화면에 붙잡아두지 않고 7초 뒤 바로 채팅으로 넘어가게
+// 바꿔뒀기 때문에(`public/static/test.js`의 `startGeneration`), 이 요청이
+// 오래 걸려도 사용자는 채팅을 하며 기다릴 수 있다 — 그래서 길게 잡아도 괜찮음.
 //
 // ⚠️ 예전엔 이 호출을 waitUntil로 백그라운드에 던졌는데, 실사진(수 MB) 테스트에서
 // 매번 "함수는 시작됨(디버그 마커까지 기록됨) → AtlasCloud fetch 도중 실행이
@@ -184,7 +189,7 @@ function extractOutputUrl(pollRes: any): string | null {
 // 판단 — 그래서 "시작" 요청만큼은 요청 처리 안에서 직접 기다리도록 바꿈.
 // 실제 완료 확인(폴링)은 여전히 클라이언트가 /status를 호출할 때마다
 // syncJobStatus()가 그때그때 짧게 조회한다.
-const ATLAS_START_TIMEOUT_MS = 25000
+const ATLAS_START_TIMEOUT_MS = 3 * 60 * 1000
 
 async function startAtlasJob(
   apiKey: string,

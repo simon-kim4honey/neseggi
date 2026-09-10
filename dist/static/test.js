@@ -270,12 +270,13 @@
   const genStatusText = document.getElementById('gen-status-text')
   const genRetryBtn = document.getElementById('gen-retry')
 
-  async function startGeneration() {
+  function startGeneration() {
     showStep('step-generating')
     genStatusText.textContent = ''
     genRetryBtn.classList.add('hidden')
     state.chatEntered = false
     state.pendingImageUrl = null
+    state.pendingImageCaption = null
     state.pendingGenerationError = null
 
     if (!state.petPhoto) {
@@ -290,22 +291,36 @@
     if (state.ownerPhoto) body.ownerImage = state.ownerPhoto
     if (state.bgPhoto) body.backgroundImage = state.bgPhoto
 
-    const { ok, data } = await api('/api/generate/start', {
+    // AtlasCloud가 "생성 시작" 요청 자체를 느리게 받아줄 때가 있어서(최대
+    // 3분까지) 이 요청을 기다리지 않고 바로 7초짜리 로딩 화면 → 채팅 전환을
+    // 진행한다 — 응답은 백그라운드에서 계속 기다리다가, 늦게라도 성공하면
+    // 폴링을 시작하고 실패하면 상황에 맞게(로딩 화면 or 채팅 중) 알려준다.
+    api('/api/generate/start', {
       method: 'POST',
       headers: { 'X-Neseggi-QA': '1' }, // QA 테스트 페이지 전용 — 크레딧 차감 우회
       body: JSON.stringify(body),
+    }).then(({ ok, data }) => {
+      if (!ok) {
+        handleGenerationStartFailed(data.error)
+        return
+      }
+      pollGenerationInBackground(data.jobId)
     })
-    if (!ok) {
-      // AtlasCloud 응답 지연 등으로 생성 시작 자체가 실패하는 경우가
-      // 간헐적으로 있음 — 막다른 화면에 갇히지 않도록 재시도 버튼을 보여준다.
-      genStatusText.textContent = '오류: ' + (data.error || '생성 시작 실패')
-      genRetryBtn.classList.remove('hidden')
-      return
-    }
-    pollGenerationInBackground(data.jobId)
+
     setTimeout(() => enterChat(), GENERATING_SCREEN_MS)
   }
   genRetryBtn.addEventListener('click', startGeneration)
+
+  function handleGenerationStartFailed(errorMessage) {
+    // 아직 로딩 화면이면 재시도 버튼으로, 이미 채팅에 들어와 있으면
+    // 채팅 안내 문구로 알려준다.
+    if (state.chatEntered) {
+      appendSystemNote('사진 생성을 시작하지 못했어요' + (errorMessage ? ` (${errorMessage})` : ''))
+    } else {
+      genStatusText.textContent = '오류: ' + (errorMessage || '생성 시작 실패')
+      genRetryBtn.classList.remove('hidden')
+    }
+  }
 
   function pollGenerationInBackground(jobId) {
     const interval = setInterval(async () => {

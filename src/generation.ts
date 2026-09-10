@@ -26,6 +26,23 @@ function isDataUrl(v: unknown): v is string {
   return typeof v === 'string' && /^data:image\/(png|jpe?g|webp);base64,/.test(v)
 }
 
+// base64 이미지는 D1 컬럼(값 크기 제한)이 아니라 KV에 저장한다 — lookbook-ai도
+// 같은 이유로 업로드 이미지를 KV(clothing_img:{job_id})에 저장하는 패턴을 쓴다.
+// D1의 owner_image_b64/pet_image_b64/background_image_b64 컬럼에는 원본 대신
+// 이 KV 키를 저장한다.
+const IMAGE_KV_TTL_SECONDS = 60 * 60 * 24 * 14 // 14일
+
+async function storeInputImage(
+  kv: KVNamespace,
+  jobId: string,
+  slot: 'pet' | 'owner' | 'background',
+  dataUrl: string
+): Promise<string> {
+  const key = `gen_input:${jobId}:${slot}`
+  await kv.put(key, dataUrl, { expirationTtl: IMAGE_KV_TTL_SECONDS })
+  return key
+}
+
 // ── 배경/컨셉 프리셋 ──
 const CONCEPTS: Record<string, { label: string; promptFragment: string }> = {
   studio: {
@@ -195,71 +212,75 @@ async function runGenerationJob(
 // body: { petImage: dataUrl, ownerImage?: dataUrl, concept?: 'studio'|'park'|'christmas' }
 // ────────────────────────────────────────────────────
 generation.post('/start', async (c) => {
-  const db = c.env.NESEGGI_DB
-  const token = c.req.header('X-Session-Token')
-  const user = await getSessionUser(db, token)
-  if (!user) return c.json({ error: '로그인이 필요합니다.', code: 'UNAUTHORIZED' }, 401)
+  try {
+    const db = c.env.NESEGGI_DB
+    const token = c.req.header('X-Session-Token')
+    const user = await getSessionUser(db, token)
+    if (!user) return c.json({ error: '로그인이 필요합니다.', code: 'UNAUTHORIZED' }, 401)
 
-  const body = await c.req.json().catch(() => null)
-  const petImage = body?.petImage
-  const ownerImage = body?.ownerImage
-  const backgroundImage = body?.backgroundImage
-  const conceptId = typeof body?.concept === 'string' && CONCEPTS[body.concept] ? body.concept : DEFAULT_CONCEPT
+    const body = await c.req.json().catch(() => null)
+    const petImage = body?.petImage
+    const ownerImage = body?.ownerImage
+    const backgroundImage = body?.backgroundImage
+    const conceptId = typeof body?.concept === 'string' && CONCEPTS[body.concept] ? body.concept : DEFAULT_CONCEPT
 
-  if (!isDataUrl(petImage)) {
-    return c.json({ error: '반려동물 사진이 필요합니다.', code: 'PET_IMAGE_REQUIRED' }, 400)
+    if (!isDataUrl(petImage)) {
+      return c.json({ error: '반려동물 사진이 필요합니다.', code: 'PET_IMAGE_REQUIRED' }, 400)
+    }
+    if (!isDataUrl(ownerImage)) {
+      return c.json({ error: '보호자 사진이 필요합니다.', code: 'OWNER_IMAGE_REQUIRED' }, 400)
+    }
+    const hasBackgroundImage = isDataUrl(backgroundImage)
+
+    if ((user as any).credits < GENERATION_CREDIT_COST) {
+      return c.json({ error: '크레딧이 부족합니다.', code: 'INSUFFICIENT_CREDITS' }, 402)
+    }
+
+    const jobId = newJobId()
+
+    // 차감은 잔액 조건을 다시 걸어 동시 요청으로 인한 이중 차감을 방지
+    const deduct = await db
+      .prepare('UPDATE users SET credits = credits - ? WHERE id = ? AND credits >= ?')
+      .bind(GENERATION_CREDIT_COST, (user as any).id, GENERATION_CREDIT_COST)
+      .run()
+    if (!deduct.meta.changes) {
+      return c.json({ error: '크레딧이 부족합니다.', code: 'INSUFFICIENT_CREDITS' }, 402)
+    }
+
+    const balanceRow: any = await db.prepare('SELECT credits FROM users WHERE id = ?').bind((user as any).id).first()
+    await db
+      .prepare(
+        `INSERT INTO credit_logs (user_id, type, amount, balance, reason, ref_id)
+         VALUES (?, 'deduct', ?, ?, 'pet_photo_generation', ?)`
+      )
+      .bind((user as any).id, -GENERATION_CREDIT_COST, balanceRow.credits, jobId)
+      .run()
+
+    // 원본 이미지는 KV에 저장 (D1 컬럼 값 크기 제한 회피) — D1엔 KV 키만 기록
+    const petImageKey = await storeInputImage(c.env.NESEGGI_KV, jobId, 'pet', petImage)
+    const ownerImageKey = await storeInputImage(c.env.NESEGGI_KV, jobId, 'owner', ownerImage)
+    const backgroundImageKey = hasBackgroundImage
+      ? await storeInputImage(c.env.NESEGGI_KV, jobId, 'background', backgroundImage)
+      : null
+
+    await db
+      .prepare(
+        `INSERT INTO generation_logs (id, user_id, owner_image_b64, pet_image_b64, background_image_b64, output_type, concept, status, credits_used)
+         VALUES (?, ?, ?, ?, ?, 'image', ?, 'pending', ?)`
+      )
+      .bind(jobId, (user as any).id, ownerImageKey, petImageKey, backgroundImageKey, conceptId, GENERATION_CREDIT_COST)
+      .run()
+
+    const prompt = buildPrompt(conceptId, hasBackgroundImage)
+    const images = hasBackgroundImage ? [petImage, ownerImage, backgroundImage] : [petImage, ownerImage]
+
+    c.executionCtx.waitUntil(runGenerationJob(db, c.env.ATLAS_API_KEY, jobId, (user as any).id, prompt, images))
+
+    return c.json({ jobId, status: 'pending' }, 202)
+  } catch (err: any) {
+    console.error('generate/start error:', err)
+    return c.json({ error: '서버 오류가 발생했습니다.', code: 'INTERNAL_ERROR', message: err?.message }, 500)
   }
-  if (!isDataUrl(ownerImage)) {
-    return c.json({ error: '보호자 사진이 필요합니다.', code: 'OWNER_IMAGE_REQUIRED' }, 400)
-  }
-  const hasBackgroundImage = isDataUrl(backgroundImage)
-
-  if ((user as any).credits < GENERATION_CREDIT_COST) {
-    return c.json({ error: '크레딧이 부족합니다.', code: 'INSUFFICIENT_CREDITS' }, 402)
-  }
-
-  const jobId = newJobId()
-
-  // 차감은 잔액 조건을 다시 걸어 동시 요청으로 인한 이중 차감을 방지
-  const deduct = await db
-    .prepare('UPDATE users SET credits = credits - ? WHERE id = ? AND credits >= ?')
-    .bind(GENERATION_CREDIT_COST, (user as any).id, GENERATION_CREDIT_COST)
-    .run()
-  if (!deduct.meta.changes) {
-    return c.json({ error: '크레딧이 부족합니다.', code: 'INSUFFICIENT_CREDITS' }, 402)
-  }
-
-  const balanceRow: any = await db.prepare('SELECT credits FROM users WHERE id = ?').bind((user as any).id).first()
-  await db
-    .prepare(
-      `INSERT INTO credit_logs (user_id, type, amount, balance, reason, ref_id)
-       VALUES (?, 'deduct', ?, ?, 'pet_photo_generation', ?)`
-    )
-    .bind((user as any).id, -GENERATION_CREDIT_COST, balanceRow.credits, jobId)
-    .run()
-
-  await db
-    .prepare(
-      `INSERT INTO generation_logs (id, user_id, owner_image_b64, pet_image_b64, background_image_b64, output_type, concept, status, credits_used)
-       VALUES (?, ?, ?, ?, ?, 'image', ?, 'pending', ?)`
-    )
-    .bind(
-      jobId,
-      (user as any).id,
-      ownerImage,
-      petImage,
-      hasBackgroundImage ? backgroundImage : null,
-      conceptId,
-      GENERATION_CREDIT_COST
-    )
-    .run()
-
-  const prompt = buildPrompt(conceptId, hasBackgroundImage)
-  const images = hasBackgroundImage ? [petImage, ownerImage, backgroundImage] : [petImage, ownerImage]
-
-  c.executionCtx.waitUntil(runGenerationJob(db, c.env.ATLAS_API_KEY, jobId, (user as any).id, prompt, images))
-
-  return c.json({ jobId, status: 'pending' }, 202)
 })
 
 // ────────────────────────────────────────────────────

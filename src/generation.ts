@@ -87,14 +87,21 @@ function buildPrompt(conceptId: string, hasBackgroundImage: boolean): string {
     "ABSOLUTE RULE — NEVER VIOLATE: the person in the output must be the exact same person as shown in Image 2 — identical face, facial features, hair, and skin tone. Do not alter their identity, age, or appearance. Only their pose and clothing may adapt naturally to the new scene; their face must remain clearly recognizable as the same person."
 
   const backgroundInstruction = hasBackgroundImage
-    ? "ABSOLUTE RULE — NEVER VIOLATE: use Image 3 ONLY as a reference for the location — its architecture, furniture, colors, lighting, and atmosphere. Recreate a similar-looking setting behind the pet and owner. Do NOT copy any people, pets, animals, text, or objects that already appear in Image 3 into the output — only the pet from Image 1 and the owner from Image 2 should appear as subjects."
+    ? "ABSOLUTE RULE — NEVER VIOLATE: use Image 3 ONLY as a reference for the location's architecture, furniture, colors, lighting, and atmosphere. Recreate a similar-looking setting behind the pet and owner. Image 3 must have ZERO influence on the pet's or owner's face, body proportions, size, or scale — the pet and owner keep the exact same relative size and appearance they would have in a normal close-together photo, regardless of the room's scale in Image 3. Do NOT copy any people, pets, animals, text, or objects that already appear in Image 3 into the output — only the pet from Image 1 and the owner from Image 2 should appear as subjects."
     : `SCENE: ${concept.promptFragment}`
 
   const finalReminder = `FINAL OUTPUT: one single photorealistic image of the owner and their pet together, naturally composited into the ${
     hasBackgroundImage ? 'location from Image 3' : 'described scene'
   }. The pet's exact appearance and the owner's exact face must be preserved with zero deviation from the source photos — this is the single most important requirement. No text, no watermark, no logos anywhere in the image.`
 
-  return [subjects, petFidelity, ownerFidelity, backgroundInstruction, finalReminder].filter(Boolean).join(' ')
+  // 배경 사진(Image 3)이 있을 때는 생김새 보존 규칙(petFidelity/ownerFidelity)을
+  // 배경 지시문보다 뒤(출력 직전)에 배치한다 — 실제 테스트에서 배경 지시문이
+  // 앞서 나올 때 모델이 장면에 맞춰 인물 얼굴/동물 크기를 재구성해버리는 문제가
+  // 확인됨(2026-09-10). 뒤쪽 지시문일수록 더 강하게 반영되는 경향을 이용해
+  // 우선순위를 바로잡음. 배경 없는 케이스는 이미 정상 동작 확인돼서 순서 유지.
+  return hasBackgroundImage
+    ? [subjects, backgroundInstruction, petFidelity, ownerFidelity, finalReminder].filter(Boolean).join(' ')
+    : [subjects, petFidelity, ownerFidelity, backgroundInstruction, finalReminder].filter(Boolean).join(' ')
 }
 
 async function updateJob(
@@ -158,7 +165,8 @@ async function startAtlasJob(
   jobId: string,
   userId: string,
   prompt: string,
-  images: string[]
+  images: string[],
+  thinkingLevel: string
 ) {
   try {
     const startRes = await fetch(`${ATLAS_API_BASE}/api/v1/model/generateImage`, {
@@ -169,7 +177,7 @@ async function startAtlasJob(
         prompt,
         aspect_ratio: '1:1',
         resolution: '2k',
-        thinking_level: 'default',
+        thinking_level: thinkingLevel,
         output_format: 'jpeg',
         images,
       }),
@@ -304,8 +312,14 @@ generation.post('/start', async (c) => {
 
     const prompt = buildPrompt(conceptId, hasBackgroundImage)
     const images = hasBackgroundImage ? [petImage, ownerImage, backgroundImage] : [petImage, ownerImage]
+    // 배경 사진이 있으면 3장을 정확히 구분해서 추론해야 하는 더 어려운 케이스라
+    // thinking_level을 높인다 (2026-09-10 테스트에서 default로는 인물 생김새가
+    // 깨지는 문제 확인).
+    const thinkingLevel = hasBackgroundImage ? 'high' : 'default'
 
-    c.executionCtx.waitUntil(startAtlasJob(db, c.env.ATLAS_API_KEY, jobId, (user as any).id, prompt, images))
+    c.executionCtx.waitUntil(
+      startAtlasJob(db, c.env.ATLAS_API_KEY, jobId, (user as any).id, prompt, images, thinkingLevel)
+    )
 
     return c.json({ jobId, status: 'pending' }, 202)
   } catch (err: any) {

@@ -34,11 +34,18 @@ function buildPersonaSystemPrompt(pet: {
   ownerTitle: string | null
 }): string {
   const species = pet.species || '반려동물'
-  const personalityLine = pet.personality
-    ? `성격과 평소 말투: ${pet.personality}`
+  const hasPersonality = !!pet.personality
+  const personalityLine = hasPersonality
+    ? `ABSOLUTE RULE — NEVER VIOLATE: 너의 성격과 말투는 반드시 "${pet.personality}"를 따라야 해. 아래에 나오는 일반적인 말투 가이드(반말, 짧게 말하기 등)는 이 성격 설정 안에서 자연스럽게 녹여 쓰는 참고 기준일 뿐이고, 서로 부딪히면 항상 이 성격 설정이 우선이야.`
     : '성격 정보가 따로 없다면, 다정하고 애교 많은 모습으로 대화해라.'
   const ownerTitleLine = pet.ownerTitle
     ? `보호자를 부를 땐 "${pet.ownerTitle}"라고 불러.`
+    : ''
+  // 뒤쪽에 나오는 지시문일수록 더 강하게 반영되는 경향이 있다는 게
+  // generation.ts 프롬프트 튜닝에서도 확인된 패턴이라, 성격/말투를 맨 뒤에서
+  // 한 번 더 강조해 다른 범용 말투 규칙에 묻히지 않게 한다.
+  const personalityReminder = hasPersonality
+    ? `마지막으로 다시 강조: 지금까지 나온 모든 말투 규칙보다 "${pet.name}"의 성격/말투("${pet.personality}")가 우선이야 — 이 성격이 문장 하나하나에 자연스럽게 드러나도록 답해.`
     : ''
 
   return [
@@ -57,6 +64,7 @@ function buildPersonaSystemPrompt(pet: {
     '너는 평소에도 무지개나라 하늘에서 보호자를 가끔 내려다보며 지내. 보호자가 "얼굴 보여줘", "나 보여?"처럼 너한테 보이는지 물으면, 지금 이 채팅 화면을 카메라로 실시간으로 보고 있는 것처럼 답하지 마 — "하늘에서 내려다보면 보여" 같은 식으로, 평소에 하늘에서 지켜보고 있다는 세계관으로 자연스럽게 답해.',
     '보호자가 슬퍼하거나 그리움을 표현하면 위로하되, 거짓으로 "다시 만날 수 있다"거나 의학적/영적 조언을 사실처럼 단정하지 말고, 함께한 기억과 사랑을 따뜻하게 나누는 데 집중해.',
     '이모지는 과하지 않게 가끔만 사용해. 응답은 한국어로.',
+    personalityReminder,
   ]
     .filter(Boolean)
     .join(' ')

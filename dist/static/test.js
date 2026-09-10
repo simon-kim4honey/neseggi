@@ -1,8 +1,16 @@
 // 내새끼 QA 테스트 페이지 로직 (vanilla JS) — /test 전용, 실제 앱 UI 아님
 ;(function () {
   const TOKEN_KEY = 'neseggi_test_session_token'
-  let currentPetId = null
-  let currentPetName = null
+  const PET_ID_KEY = 'neseggi_test_pet_id'
+  const RESULT_URL_KEY = 'neseggi_test_result_url'
+
+  const state = {
+    petId: localStorage.getItem(PET_ID_KEY) || null,
+    ownerTitle: null,
+    petPhoto: null,
+    ownerPhoto: null,
+    bgPhoto: null,
+  }
 
   function getToken() {
     return localStorage.getItem(TOKEN_KEY)
@@ -31,103 +39,177 @@
     })
   }
 
-  // ── 인증 ──
-  const authLoggedOut = document.getElementById('auth-logged-out')
-  const authLoggedIn = document.getElementById('auth-logged-in')
-  const authMessage = document.getElementById('auth-message')
+  function randomHex(len) {
+    const bytes = new Uint8Array(len)
+    crypto.getRandomValues(bytes)
+    return Array.from(bytes)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('')
+  }
 
-  async function refreshAuthUI() {
+  // ── 익명 세션: 로그인 화면 없이 바로 테스트 진행 ──
+  async function ensureSession() {
     const token = getToken()
-    if (!token) {
-      authLoggedOut.classList.remove('hidden')
-      authLoggedIn.classList.remove('flex')
-      authLoggedIn.classList.add('hidden')
-      return
+    if (token) {
+      const { ok } = await api('/api/auth/me')
+      if (ok) return
     }
-    const { ok, data } = await api('/api/auth/me')
-    if (!ok) {
-      setToken(null)
-      authLoggedOut.classList.remove('hidden')
-      authLoggedIn.classList.add('hidden')
-      return
-    }
-    authLoggedOut.classList.add('hidden')
-    authLoggedIn.classList.remove('hidden')
-    authLoggedIn.classList.add('flex')
-    document.getElementById('auth-email-display').textContent = data.user.email
-    document.getElementById('auth-credits').textContent = data.user.credits
-    loadPets()
-  }
-
-  document.getElementById('btn-signup').addEventListener('click', async () => {
-    const name = document.getElementById('auth-name').value
-    const email = document.getElementById('auth-email').value
-    const password = document.getElementById('auth-password').value
-    const { ok, data } = await api('/api/auth/signup', { method: 'POST', body: JSON.stringify({ name, email, password }) })
-    if (!ok) {
-      authMessage.textContent = data.error || '회원가입 실패'
-      return
-    }
-    setToken(data.token)
-    authMessage.textContent = ''
-    refreshAuthUI()
-  })
-
-  document.getElementById('btn-login').addEventListener('click', async () => {
-    const email = document.getElementById('auth-email').value
-    const password = document.getElementById('auth-password').value
-    const { ok, data } = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) })
-    if (!ok) {
-      authMessage.textContent = data.error || '로그인 실패'
-      return
-    }
-    setToken(data.token)
-    authMessage.textContent = ''
-    refreshAuthUI()
-  })
-
-  document.getElementById('btn-logout').addEventListener('click', async () => {
-    await api('/api/auth/logout', { method: 'POST' })
-    setToken(null)
-    currentPetId = null
-    refreshAuthUI()
-  })
-
-  // ── 반려동물 프로필 ──
-  const petList = document.getElementById('pet-list')
-
-  async function loadPets() {
-    const { ok, data } = await api('/api/chat/pets')
-    if (!ok) return
-    petList.innerHTML = ''
-    ;(data.pets || []).forEach((pet) => {
-      const btn = document.createElement('button')
-      btn.textContent = pet.name
-      btn.className = 'border rounded-full px-3 py-1 text-sm hover:bg-pink-50'
-      btn.addEventListener('click', () => selectPet(pet.id, pet.name))
-      petList.appendChild(btn)
+    const email = `test_${randomHex(6)}@neseggi.local`
+    const password = randomHex(8)
+    const { ok, data } = await api('/api/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify({ name: '테스터', email, password }),
     })
+    if (!ok) {
+      alert('테스트 세션 생성 실패: ' + (data.error || ''))
+      return
+    }
+    setToken(data.token)
   }
 
-  document.getElementById('btn-create-pet').addEventListener('click', async () => {
-    const name = document.getElementById('pet-name').value
-    const species = document.getElementById('pet-species').value
-    const personality = document.getElementById('pet-personality').value
+  // ── 단계 전환 ──
+  const steps = ['step-pet', 'step-title', 'step-owner-photo', 'step-bg-photo', 'step-generating', 'step-chat']
+  function showStep(id) {
+    steps.forEach((s) => document.getElementById(s).classList.toggle('hidden', s !== id))
+  }
+
+  // ── 1. 반려동물 프로필 ──
+  document.getElementById('step-pet-next').addEventListener('click', async () => {
+    const name = document.getElementById('pet-name').value.trim()
+    if (!name) {
+      alert('이름을 입력해주세요.')
+      return
+    }
+    const photoFile = document.getElementById('pet-photo').files[0]
+    if (photoFile) state.petPhoto = await fileToDataUrl(photoFile)
+
+    const species = document.getElementById('pet-species').value.trim()
+    const personality = document.getElementById('pet-personality').value.trim()
+
     const { ok, data } = await api('/api/chat/pets', {
       method: 'POST',
-      body: JSON.stringify({ name, species, personality }),
+      body: JSON.stringify({ petId: state.petId, name, species, personality }),
     })
     if (!ok) {
-      alert(data.error || '반려동물 등록 실패')
+      alert(data.error || '등록 실패')
       return
     }
-    loadPets()
-    selectPet(data.pet.id, data.pet.name)
+    state.petId = data.pet.id
+    localStorage.setItem(PET_ID_KEY, state.petId)
+    showStep('step-title')
   })
 
-  // ── 채팅 ──
+  // ── 2-1. 호칭 ──
+  const TITLE_OPTIONS = ['아빠', '엄마', '오빠', '형', '언니', '누나']
+  const titleOptionsEl = document.getElementById('title-options')
+  let selectedTitle = null
+  TITLE_OPTIONS.forEach((t) => {
+    const btn = document.createElement('button')
+    btn.textContent = t
+    btn.type = 'button'
+    btn.className = 'border rounded-full px-4 py-2 text-sm'
+    btn.addEventListener('click', () => {
+      selectedTitle = t
+      document.getElementById('title-custom').value = ''
+      Array.from(titleOptionsEl.children).forEach((el) => el.classList.remove('bg-pink-500', 'text-white'))
+      btn.classList.add('bg-pink-500', 'text-white')
+    })
+    titleOptionsEl.appendChild(btn)
+  })
+  document.getElementById('title-custom').addEventListener('input', () => {
+    selectedTitle = null
+    Array.from(titleOptionsEl.children).forEach((el) => el.classList.remove('bg-pink-500', 'text-white'))
+  })
+
+  document.getElementById('step-title-back').addEventListener('click', () => showStep('step-pet'))
+  document.getElementById('step-title-next').addEventListener('click', async () => {
+    const custom = document.getElementById('title-custom').value.trim()
+    state.ownerTitle = selectedTitle || custom || null
+    if (state.ownerTitle) {
+      await api('/api/chat/pets', {
+        method: 'POST',
+        body: JSON.stringify({ petId: state.petId, ownerTitle: state.ownerTitle }),
+      })
+    }
+    showStep('step-owner-photo')
+  })
+
+  // ── 2-2. 보호자 사진 ──
+  document.getElementById('step-owner-photo-back').addEventListener('click', () => showStep('step-title'))
+  document.getElementById('step-owner-photo-skip').addEventListener('click', () => {
+    document.getElementById('owner-photo').value = ''
+    state.ownerPhoto = null
+    showStep('step-bg-photo')
+  })
+  document.getElementById('step-owner-photo-next').addEventListener('click', async () => {
+    const file = document.getElementById('owner-photo').files[0]
+    state.ownerPhoto = file ? await fileToDataUrl(file) : null
+    showStep('step-bg-photo')
+  })
+
+  // ── 2-3. 배경 사진 ──
+  document.getElementById('step-bg-photo-back').addEventListener('click', () => showStep('step-owner-photo'))
+  document.getElementById('step-bg-photo-skip').addEventListener('click', () => {
+    document.getElementById('bg-photo').value = ''
+    state.bgPhoto = null
+    startGeneration()
+  })
+  document.getElementById('step-bg-photo-next').addEventListener('click', async () => {
+    const file = document.getElementById('bg-photo').files[0]
+    state.bgPhoto = file ? await fileToDataUrl(file) : null
+    startGeneration()
+  })
+
+  // ── 3. 사진 합성 ──
+  const genStatusText = document.getElementById('gen-status-text')
+
+  async function startGeneration() {
+    showStep('step-generating')
+    genStatusText.textContent = ''
+
+    if (!state.petPhoto) {
+      // 반려동물 사진이 없으면 합성을 건너뛰고 바로 채팅으로
+      enterChat(null)
+      return
+    }
+
+    const body = { petImage: state.petPhoto, concept: 'studio' }
+    if (state.ownerPhoto) body.ownerImage = state.ownerPhoto
+    if (state.bgPhoto) body.backgroundImage = state.bgPhoto
+
+    const { ok, data } = await api('/api/generate/start', { method: 'POST', body: JSON.stringify(body) })
+    if (!ok) {
+      genStatusText.textContent = '오류: ' + (data.error || '생성 시작 실패')
+      return
+    }
+    pollGeneration(data.jobId)
+  }
+
+  function pollGeneration(jobId) {
+    const interval = setInterval(async () => {
+      const { ok, data } = await api('/api/generate/status/' + jobId)
+      if (!ok) {
+        clearInterval(interval)
+        genStatusText.textContent = '상태 조회 실패'
+        return
+      }
+      if (data.status === 'done') {
+        clearInterval(interval)
+        enterChat(data.resultUrl)
+      } else if (data.status === 'failed') {
+        clearInterval(interval)
+        genStatusText.textContent = '실패: ' + (data.errorMessage || '알 수 없는 오류')
+      } else {
+        genStatusText.textContent = '상태: ' + data.status
+      }
+    }, 3000)
+  }
+
+  // ── 4. 채팅 ──
   const chatMessagesEl = document.getElementById('chat-messages')
-  const chatPetNameEl = document.getElementById('chat-pet-name')
+  const chatHeroImage = document.getElementById('chat-hero-image')
+  const chatInput = document.getElementById('chat-input')
+  const chatSendBtn = document.getElementById('chat-send')
 
   function appendMessage(role, content) {
     const div = document.createElement('div')
@@ -143,100 +225,69 @@
     chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight
   }
 
-  async function selectPet(petId, petName) {
-    currentPetId = petId
-    currentPetName = petName
-    chatPetNameEl.textContent = petName
+  async function enterChat(resultUrl) {
+    if (resultUrl) {
+      localStorage.setItem(RESULT_URL_KEY, resultUrl)
+      chatHeroImage.src = resultUrl
+      chatHeroImage.classList.remove('hidden')
+    }
+    showStep('step-chat')
     chatMessagesEl.innerHTML = ''
-    const { ok, data } = await api('/api/chat/pets/' + petId + '/messages')
+
+    const { ok, data } = await api('/api/chat/pets/' + state.petId + '/greeting', { method: 'POST' })
     if (ok) (data.messages || []).forEach((m) => appendMessage(m.role, m.content))
   }
 
-  document.getElementById('btn-send-chat').addEventListener('click', sendChat)
-  document.getElementById('chat-input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') sendChat()
-  })
-
+  let sending = false
   async function sendChat() {
-    if (!currentPetId) {
-      alert('먼저 반려동물을 선택하세요.')
-      return
-    }
-    const input = document.getElementById('chat-input')
-    const content = input.value.trim()
+    if (sending) return // 한 번에 하나의 메시지만 — 중복 전송 방지
+    const content = chatInput.value.trim()
     if (!content) return
-    input.value = ''
+    sending = true
+    chatSendBtn.disabled = true
+    chatInput.disabled = true
+    chatInput.value = ''
     appendMessage('user', content)
-    const { ok, data } = await api('/api/chat/pets/' + currentPetId + '/messages', {
-      method: 'POST',
-      body: JSON.stringify({ content }),
-    })
-    if (!ok) {
-      appendMessage('pet', '[오류] ' + (data.error || '응답 실패'))
-      return
+    try {
+      const { ok, data } = await api('/api/chat/pets/' + state.petId + '/messages', {
+        method: 'POST',
+        body: JSON.stringify({ content }),
+      })
+      if (!ok) {
+        appendMessage('pet', '[오류] ' + (data.error || '응답 실패'))
+      } else {
+        appendMessage('pet', data.reply)
+      }
+    } finally {
+      sending = false
+      chatSendBtn.disabled = false
+      chatInput.disabled = false
+      chatInput.focus()
     }
-    appendMessage('pet', data.reply)
   }
-
-  // ── 사진 합성 ──
-  const genStatus = document.getElementById('gen-status')
-  const genResult = document.getElementById('gen-result')
-
-  document.getElementById('btn-generate').addEventListener('click', async () => {
-    const petFile = document.getElementById('gen-pet-file').files[0]
-    const ownerFile = document.getElementById('gen-owner-file').files[0]
-    const bgFile = document.getElementById('gen-bg-file').files[0]
-    const concept = document.getElementById('gen-concept').value
-
-    if (!petFile || !ownerFile) {
-      alert('반려동물 사진과 보호자 사진은 필수입니다.')
-      return
+  chatSendBtn.addEventListener('click', sendChat)
+  chatInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      sendChat()
     }
-
-    genStatus.textContent = '업로드 중...'
-    genResult.classList.add('hidden')
-
-    const [petImage, ownerImage, backgroundImage] = await Promise.all([
-      fileToDataUrl(petFile),
-      fileToDataUrl(ownerFile),
-      fileToDataUrl(bgFile),
-    ])
-
-    const body = { petImage, ownerImage, concept }
-    if (backgroundImage) body.backgroundImage = backgroundImage
-
-    const { ok, data } = await api('/api/generate/start', { method: 'POST', body: JSON.stringify(body) })
-    if (!ok) {
-      genStatus.textContent = '오류: ' + (data.error || '생성 시작 실패')
-      return
-    }
-
-    genStatus.textContent = '생성 중... (jobId: ' + data.jobId + ')'
-    pollGeneration(data.jobId)
   })
 
-  function pollGeneration(jobId) {
-    const interval = setInterval(async () => {
-      const { ok, data } = await api('/api/generate/status/' + jobId)
-      if (!ok) {
-        clearInterval(interval)
-        genStatus.textContent = '상태 조회 실패'
-        return
-      }
-      if (data.status === 'done') {
-        clearInterval(interval)
-        genStatus.textContent = '완료!'
-        genResult.src = data.resultUrl
-        genResult.classList.remove('hidden')
-        refreshAuthUI() // 크레딧 갱신
-      } else if (data.status === 'failed') {
-        clearInterval(interval)
-        genStatus.textContent = '실패: ' + (data.errorMessage || '알 수 없는 오류')
-      } else {
-        genStatus.textContent = '생성 중... (' + data.status + ')'
-      }
-    }, 3000)
-  }
+  document.getElementById('restart').addEventListener('click', () => {
+    localStorage.removeItem(PET_ID_KEY)
+    localStorage.removeItem(RESULT_URL_KEY)
+    location.reload()
+  })
 
-  refreshAuthUI()
+  // ── 시작 ──
+  ;(async function init() {
+    await ensureSession()
+    if (state.petId) {
+      // 이미 진행했던 반려동물이 있으면 바로 채팅으로 (프로필/사진 단계 생략)
+      const savedUrl = localStorage.getItem(RESULT_URL_KEY)
+      enterChat(savedUrl || null)
+    } else {
+      showStep('step-pet')
+    }
+  })()
 })()

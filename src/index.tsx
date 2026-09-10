@@ -41,80 +41,83 @@ app.get('/', (c) => {
 
 // ────────────────────────────────────────────────────
 // /test — QA용 테스트 화면. 실제 서비스는 앱(모바일)이고 이 페이지는 최종
-// 사용자 UI가 아니다 — API가 curl 없이도 브라우저에서 수동 검증 가능하도록
-// 만든 임시 도구. 로그인/회원가입 → 반려동물 프로필 → 채팅 → 사진 합성까지
-// 한 화면에서 확인 가능.
+// 사용자 UI가 아니다 — API가 curl 없이도 브라우저에서 단계별로(우리 아이
+// 프로필 → 보호자 프로필 → 사진 합성 → 채팅) 검증 가능하도록 만든 임시 도구.
+// 로그인 화면 없음 — 접속하면 내부적으로 익명 세션을 자동 생성한다.
 // ────────────────────────────────────────────────────
 app.get('/test', (c) => {
   return c.render(
     <>
-      <div id="test-app" class="max-w-2xl mx-auto p-4 space-y-6 pb-20">
-        <div class="bg-yellow-100 border border-yellow-300 text-yellow-900 text-sm rounded-lg px-3 py-2">
-          ⚠️ 이 페이지는 QA용 테스트 화면입니다. 실제 서비스는 앱(모바일)으로 제공됩니다.
-        </div>
-
-        <h1 class="text-xl font-bold">내새끼 🐾 테스트 페이지</h1>
-
-        {/* 로그인/회원가입 */}
-        <section class="border rounded-xl p-4 space-y-3">
-          <h2 class="font-semibold">1. 로그인 / 회원가입</h2>
-          <div id="auth-logged-out" class="space-y-2">
-            <input id="auth-name" type="text" placeholder="이름 (회원가입 시)" class="w-full border rounded px-3 py-2" />
-            <input id="auth-email" type="email" placeholder="이메일" class="w-full border rounded px-3 py-2" />
-            <input id="auth-password" type="password" placeholder="비밀번호 (8자 이상)" class="w-full border rounded px-3 py-2" />
-            <div class="flex gap-2">
-              <button id="btn-signup" class="bg-pink-500 text-white rounded px-4 py-2 flex-1">회원가입</button>
-              <button id="btn-login" class="bg-gray-700 text-white rounded px-4 py-2 flex-1">로그인</button>
-            </div>
-          </div>
-          <div id="auth-logged-in" class="hidden items-center justify-between">
-            <span class="text-sm">
-              <span id="auth-email-display"></span> 로그인됨 · 크레딧 <span id="auth-credits">-</span>
-            </span>
-            <button id="btn-logout" class="text-sm text-red-600 underline">로그아웃</button>
-          </div>
-          <p id="auth-message" class="text-sm text-gray-500"></p>
-        </section>
-
-        {/* 반려동물 프로필 */}
-        <section class="border rounded-xl p-4 space-y-3">
-          <h2 class="font-semibold">2. 반려동물 프로필</h2>
+      <div id="test-app" class="max-w-md mx-auto p-4 pb-10">
+        {/* 1. 우리 아이 프로필 */}
+        <section id="step-pet" class="step space-y-3">
+          <h2 class="text-lg font-bold">우리 아이 프로필</h2>
+          <label class="block text-sm text-gray-500">
+            반려동물 사진
+            <input id="pet-photo" type="file" accept="image/*" class="block w-full mt-1" />
+          </label>
           <input id="pet-name" type="text" placeholder="이름 (예: 콩이)" class="w-full border rounded px-3 py-2" />
           <input id="pet-species" type="text" placeholder="종 (예: 강아지)" class="w-full border rounded px-3 py-2" />
           <input id="pet-personality" type="text" placeholder="성격/말투" class="w-full border rounded px-3 py-2" />
-          <button id="btn-create-pet" class="bg-pink-500 text-white rounded px-4 py-2">반려동물 등록</button>
-          <div>
-            <p class="text-sm text-gray-500 mb-1">내 반려동물 (클릭해서 채팅 상대 선택)</p>
-            <div id="pet-list" class="flex flex-wrap gap-2"></div>
+          <div class="flex justify-end">
+            <button id="step-pet-next" class="bg-pink-500 text-white rounded px-4 py-2">다음단계</button>
           </div>
         </section>
 
-        {/* 채팅 */}
-        <section class="border rounded-xl p-4 space-y-3">
-          <h2 class="font-semibold">
-            3. 채팅 — <span id="chat-pet-name" class="text-pink-600">반려동물을 선택하세요</span>
-          </h2>
+        {/* 2. 보호자 프로필 — 호칭 */}
+        <section id="step-title" class="step hidden space-y-3">
+          <h2 class="text-lg font-bold">저를 뭐라고 부를까요?</h2>
+          <div id="title-options" class="flex flex-wrap gap-2"></div>
+          <input id="title-custom" type="text" placeholder="직접 입력 (예: 지수)" class="w-full border rounded px-3 py-2" />
+          <div class="flex justify-between pt-2">
+            <button id="step-title-back" class="text-gray-500">이전단계</button>
+            <button id="step-title-next" class="bg-pink-500 text-white rounded px-4 py-2">다음단계</button>
+          </div>
+        </section>
+
+        {/* 2. 보호자 프로필 — 보호자 사진 */}
+        <section id="step-owner-photo" class="step hidden space-y-3">
+          <h2 class="text-lg font-bold">보호자 사진을 넣어주세요</h2>
+          <p class="text-sm text-gray-500">우리 아이와 함께 있는 사진이 생겨요</p>
+          <input id="owner-photo" type="file" accept="image/*" class="block w-full" />
+          <div class="flex justify-between pt-2">
+            <button id="step-owner-photo-back" class="text-gray-500">이전단계</button>
+            <div class="flex gap-2">
+              <button id="step-owner-photo-skip" class="border rounded px-3 py-2 text-sm">넣지 않아도 괜찮아요</button>
+              <button id="step-owner-photo-next" class="bg-pink-500 text-white rounded px-4 py-2">다음단계</button>
+            </div>
+          </div>
+        </section>
+
+        {/* 2. 보호자 프로필 — 배경 사진 */}
+        <section id="step-bg-photo" class="step hidden space-y-3">
+          <h2 class="text-lg font-bold">우리집 또는 자주 가는 장소를 올려주세요</h2>
+          <p class="text-sm text-gray-500">우리 아이가 그곳에 있는 사진이 생겨요</p>
+          <input id="bg-photo" type="file" accept="image/*" class="block w-full" />
+          <div class="flex justify-between pt-2">
+            <button id="step-bg-photo-back" class="text-gray-500">이전단계</button>
+            <div class="flex gap-2">
+              <button id="step-bg-photo-skip" class="border rounded px-3 py-2 text-sm">넣지 않아도 괜찮아요</button>
+              <button id="step-bg-photo-next" class="bg-pink-500 text-white rounded px-4 py-2">다음단계</button>
+            </div>
+          </div>
+        </section>
+
+        {/* 3. 사진 합성 진행 중 */}
+        <section id="step-generating" class="step hidden text-center space-y-3 py-16">
+          <p class="text-lg">사진을 만들고 있어요...</p>
+          <p id="gen-status-text" class="text-sm text-gray-500"></p>
+        </section>
+
+        {/* 4. 채팅 */}
+        <section id="step-chat" class="step hidden space-y-3">
+          <img id="chat-hero-image" class="hidden w-full rounded-xl border" />
           <div id="chat-messages" class="h-80 overflow-y-auto bg-gray-50 rounded p-3 space-y-2 text-sm"></div>
           <div class="flex gap-2">
             <input id="chat-input" type="text" placeholder="메시지 입력..." class="flex-1 border rounded px-3 py-2" />
-            <button id="btn-send-chat" class="bg-pink-500 text-white rounded px-4 py-2">보내기</button>
+            <button id="chat-send" class="bg-pink-500 text-white rounded px-4 py-2">보내기</button>
           </div>
-        </section>
-
-        {/* 사진 합성 */}
-        <section class="border rounded-xl p-4 space-y-3">
-          <h2 class="font-semibold">4. 사진 합성 (부가 기능)</h2>
-          <label class="block text-sm">반려동물 사진 (필수)<input id="gen-pet-file" type="file" accept="image/*" class="block w-full mt-1" /></label>
-          <label class="block text-sm">보호자 사진 (필수)<input id="gen-owner-file" type="file" accept="image/*" class="block w-full mt-1" /></label>
-          <label class="block text-sm">배경 사진 (선택 — 없으면 아래 컨셉 사용)<input id="gen-bg-file" type="file" accept="image/*" class="block w-full mt-1" /></label>
-          <select id="gen-concept" class="w-full border rounded px-3 py-2">
-            <option value="studio">스튜디오</option>
-            <option value="park">공원</option>
-            <option value="christmas">크리스마스</option>
-          </select>
-          <button id="btn-generate" class="bg-pink-500 text-white rounded px-4 py-2">합성 시작 (5크레딧)</button>
-          <p id="gen-status" class="text-sm text-gray-500"></p>
-          <img id="gen-result" class="hidden w-full rounded border" />
+          <button id="restart" class="text-xs text-gray-400 underline">처음부터 다시 시작</button>
         </section>
       </div>
       <script src={`/static/test.js?v=${__BUILD_VERSION__}`} defer></script>

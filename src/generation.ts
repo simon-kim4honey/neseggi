@@ -66,37 +66,55 @@ const DEFAULT_CONCEPT = 'studio'
 // 짝을 이룬다. 여기서 문구를 고치면 GUARDS도 함께 업데이트할 것 — 하나라도
 // 빠지면 npm run build가 실패한다(의도적 변경임을 증명하는 절차).
 //
-// 생성 흐름: 1) 반려동물 사진(필수) 2) 보호자 사진(필수) 3) 배경 사진(선택 —
-// 반려동물과 자주 있던 장소, 없으면 프리셋 컨셉으로 대체) → 세 장을 한 장으로
-// 합성한다. 반려동물/보호자의 실제 생김새를 그대로 유지하라는 지시문이
-// 핵심이다 — 이게 조용히 사라지거나 약해지면, 사용자가 보낸 반려동물/보호자와
-// 다르게 생긴 결과가 나와도 빌드/배포/로그 어디에도 안 남고 사용자 리포트로만
-// 발견된다(lookbook-ai에서 실제로 겪은 사고와 동일 패턴).
+// 입력 조합: 반려동물 사진(필수) + 보호자 사진(선택) + 배경 사진(선택 — 반려동물과
+// 자주 있던 장소, 없으면 프리셋 컨셉으로 대체). 이미지 순서는 항상
+// [반려동물, (보호자), (배경)] — 즉 보호자가 없으면 배경이 Image 2가 된다.
+// 반려동물/보호자의 실제 생김새를 그대로 유지하라는 지시문이 핵심이다 — 이게
+// 조용히 사라지거나 약해지면, 사용자가 보낸 반려동물/보호자와 다르게 생긴
+// 결과가 나와도 빌드/배포/로그 어디에도 안 남고 사용자 리포트로만 발견된다
+// (lookbook-ai에서 실제로 겪은 사고와 동일 패턴).
 // ────────────────────────────────────────────────────
-function buildPrompt(conceptId: string, hasBackgroundImage: boolean): string {
+function buildPrompt(conceptId: string, hasOwnerImage: boolean, hasBackgroundImage: boolean): string {
   const concept = CONCEPTS[conceptId] || CONCEPTS[DEFAULT_CONCEPT]
 
-  const subjects = hasBackgroundImage
-    ? "Image 1 shows a pet. Image 2 shows the pet's owner (a person). Image 3 is a real photo of a place where they often spend time together (e.g. their home). Combine the pet and owner from Image 1 and Image 2 into a single natural photo set in the location shown in Image 3."
-    : "Image 1 shows a pet. Image 2 shows the pet's owner (a person). Combine BOTH into a single natural photo of the owner together with their pet."
+  const backgroundImageIndex = hasOwnerImage ? 3 : 2
+
+  const subjects = [
+    'Image 1 shows a pet.',
+    hasOwnerImage ? "Image 2 shows the pet's owner (a person)." : '',
+    hasBackgroundImage
+      ? `Image ${backgroundImageIndex} is a real photo of a place where ${hasOwnerImage ? 'they' : 'it'} often spend${hasOwnerImage ? '' : 's'} time (e.g. home).`
+      : '',
+    hasOwnerImage
+      ? `Combine the pet${hasBackgroundImage ? ' and owner' : ' and the owner'} into a single natural photo${hasBackgroundImage ? ` set in the location shown in Image ${backgroundImageIndex}` : ' together'}.`
+      : `Create a single natural photo of this pet${hasBackgroundImage ? ` set in the location shown in Image ${backgroundImageIndex}` : ''}.`,
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   const petFidelity =
     'ABSOLUTE RULE — NEVER VIOLATE: the pet in the output must be the exact same animal as shown in Image 1 — identical breed, fur color, fur pattern and markings, ear shape, face, and eye color. Do not substitute a different breed, change its coat color or pattern, or generate a generic-looking animal. Every physical detail of the pet must be reproduced exactly as in the source photo — only its pose may adapt naturally to the new scene.'
 
-  const ownerFidelity =
-    "ABSOLUTE RULE — NEVER VIOLATE: the person in the output must be the exact same person as shown in Image 2 — identical face, facial features, hair, and skin tone. Do not alter their identity, age, or appearance. Only their pose and clothing may adapt naturally to the new scene; their face must remain clearly recognizable as the same person."
+  const ownerFidelity = hasOwnerImage
+    ? "ABSOLUTE RULE — NEVER VIOLATE: the person in the output must be the exact same person as shown in Image 2 — identical face, facial features, hair, and skin tone. Do not alter their identity, age, or appearance. Only their pose and clothing may adapt naturally to the new scene; their face must remain clearly recognizable as the same person."
+    : ''
 
+  const subjectsLabel = hasOwnerImage ? 'the pet or owner' : "the pet"
   const backgroundInstruction = hasBackgroundImage
-    ? "ABSOLUTE RULE — NEVER VIOLATE: use Image 3 ONLY as a reference for the location's architecture, furniture, colors, lighting, and atmosphere. Recreate a similar-looking setting behind the pet and owner. Image 3 must have ZERO influence on the pet's or owner's face, body proportions, size, or scale — the pet and owner keep the exact same relative size and appearance they would have in a normal close-together photo, regardless of the room's scale in Image 3. Do NOT copy any people, pets, animals, text, or objects that already appear in Image 3 into the output — only the pet from Image 1 and the owner from Image 2 should appear as subjects."
+    ? `ABSOLUTE RULE — NEVER VIOLATE: use Image ${backgroundImageIndex} ONLY as a reference for the location's architecture, furniture, colors, lighting, and atmosphere. Recreate a similar-looking setting behind the subject(s). Image ${backgroundImageIndex} must have ZERO influence on ${subjectsLabel}'s face, body proportions, size, or scale — the subject(s) keep the exact same relative size and appearance they would have in a normal close-up photo, regardless of the room's scale in Image ${backgroundImageIndex}. Do NOT copy any people, pets, animals, text, or objects that already appear in Image ${backgroundImageIndex} into the output — only the pet from Image 1${hasOwnerImage ? ' and the owner from Image 2' : ''} should appear as subjects.`
     : `SCENE: ${concept.promptFragment}`
 
-  const finalReminder = `FINAL OUTPUT: one single photorealistic image of the owner and their pet together, naturally composited into the ${
-    hasBackgroundImage ? 'location from Image 3' : 'described scene'
-  }. The pet's exact appearance and the owner's exact face must be preserved with zero deviation from the source photos — this is the single most important requirement. No text, no watermark, no logos anywhere in the image.`
+  const finalReminder = `FINAL OUTPUT: one single photorealistic image of ${
+    hasOwnerImage ? 'the owner and their pet together' : 'the pet'
+  }, naturally composited into the ${
+    hasBackgroundImage ? `location from Image ${backgroundImageIndex}` : 'described scene'
+  }. The pet's exact appearance${
+    hasOwnerImage ? " and the owner's exact face" : ''
+  } must be preserved with zero deviation from the source photo${hasOwnerImage ? 's' : ''} — this is the single most important requirement. No text, no watermark, no logos anywhere in the image.`
 
-  // 배경 사진(Image 3)이 있을 때는 생김새 보존 규칙(petFidelity/ownerFidelity)을
-  // 배경 지시문보다 뒤(출력 직전)에 배치한다 — 실제 테스트에서 배경 지시문이
-  // 앞서 나올 때 모델이 장면에 맞춰 인물 얼굴/동물 크기를 재구성해버리는 문제가
+  // 배경 사진이 있을 때는 생김새 보존 규칙(petFidelity/ownerFidelity)을 배경
+  // 지시문보다 뒤(출력 직전)에 배치한다 — 실제 테스트에서 배경 지시문이 앞서
+  // 나올 때 모델이 장면에 맞춰 인물 얼굴/동물 크기를 재구성해버리는 문제가
   // 확인됨(2026-09-10). 뒤쪽 지시문일수록 더 강하게 반영되는 경향을 이용해
   // 우선순위를 바로잡음. 배경 없는 케이스는 이미 정상 동작 확인돼서 순서 유지.
   return hasBackgroundImage
@@ -266,9 +284,7 @@ generation.post('/start', async (c) => {
     if (!isDataUrl(petImage)) {
       return c.json({ error: '반려동물 사진이 필요합니다.', code: 'PET_IMAGE_REQUIRED' }, 400)
     }
-    if (!isDataUrl(ownerImage)) {
-      return c.json({ error: '보호자 사진이 필요합니다.', code: 'OWNER_IMAGE_REQUIRED' }, 400)
-    }
+    const hasOwnerImage = isDataUrl(ownerImage)
     const hasBackgroundImage = isDataUrl(backgroundImage)
 
     if ((user as any).credits < GENERATION_CREDIT_COST) {
@@ -297,7 +313,9 @@ generation.post('/start', async (c) => {
 
     // 원본 이미지는 KV에 저장 (D1 컬럼 값 크기 제한 회피) — D1엔 KV 키만 기록
     const petImageKey = await storeInputImage(c.env.NESEGGI_KV, jobId, 'pet', petImage)
-    const ownerImageKey = await storeInputImage(c.env.NESEGGI_KV, jobId, 'owner', ownerImage)
+    const ownerImageKey = hasOwnerImage
+      ? await storeInputImage(c.env.NESEGGI_KV, jobId, 'owner', ownerImage)
+      : null
     const backgroundImageKey = hasBackgroundImage
       ? await storeInputImage(c.env.NESEGGI_KV, jobId, 'background', backgroundImage)
       : null
@@ -310,11 +328,11 @@ generation.post('/start', async (c) => {
       .bind(jobId, (user as any).id, ownerImageKey, petImageKey, backgroundImageKey, conceptId, GENERATION_CREDIT_COST)
       .run()
 
-    const prompt = buildPrompt(conceptId, hasBackgroundImage)
-    const images = hasBackgroundImage ? [petImage, ownerImage, backgroundImage] : [petImage, ownerImage]
-    // 배경 사진이 있으면 3장을 정확히 구분해서 추론해야 하는 더 어려운 케이스라
-    // thinking_level을 높인다 (2026-09-10 테스트에서 default로는 인물 생김새가
-    // 깨지는 문제 확인).
+    const prompt = buildPrompt(conceptId, hasOwnerImage, hasBackgroundImage)
+    const images = [petImage, ...(hasOwnerImage ? [ownerImage] : []), ...(hasBackgroundImage ? [backgroundImage] : [])]
+    // 배경 사진이 있으면 여러 장을 정확히 구분해서 추론해야 하는 더 어려운
+    // 케이스라 thinking_level을 높인다 (2026-09-10 테스트에서 default로는
+    // 인물 생김새가 깨지는 문제 확인).
     const thinkingLevel = hasBackgroundImage ? 'high' : 'default'
 
     c.executionCtx.waitUntil(

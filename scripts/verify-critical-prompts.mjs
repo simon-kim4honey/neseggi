@@ -37,6 +37,12 @@ const GUARDS = [
       "ABSOLUTE RULE — NEVER VIOLATE: the person in the output must be the exact same person as shown in Image 2 — identical face, facial features, hair, and skin tone.",
     why: '보호자 사진이 포함된 합성에서 이 문구가 사라지면 실제 보호자와 다른 사람 얼굴이 나올 수 있다.',
   },
+  {
+    name: '배경 사진은 장소 레퍼런스로만 사용 (인물/동물 복제 금지)',
+    must:
+      'use Image 3 ONLY as a reference for the location — its architecture, furniture, colors, lighting, and atmosphere.',
+    why: '이 문구가 사라지면 사용자가 올린 배경 사진(집 등)에 찍혀있던 다른 사람이나 동물이 결과물에 그대로 나타날 수 있다.',
+  },
 ]
 
 let failed = false

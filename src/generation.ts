@@ -51,34 +51,35 @@ const DEFAULT_CONCEPT = 'studio'
 // 짝을 이룬다. 여기서 문구를 고치면 GUARDS도 함께 업데이트할 것 — 하나라도
 // 빠지면 npm run build가 실패한다(의도적 변경임을 증명하는 절차).
 //
-// 반려동물/보호자의 실제 생김새를 그대로 유지하라는 지시문이 핵심이다 —
-// 이게 조용히 사라지거나 약해지면, 사용자가 보낸 반려동물과 다르게 생긴
-// "일반적인 동물"이 나와도 빌드/배포/로그 어디에도 안 남고 사용자 리포트로만
+// 생성 흐름: 1) 반려동물 사진(필수) 2) 보호자 사진(필수) 3) 배경 사진(선택 —
+// 반려동물과 자주 있던 장소, 없으면 프리셋 컨셉으로 대체) → 세 장을 한 장으로
+// 합성한다. 반려동물/보호자의 실제 생김새를 그대로 유지하라는 지시문이
+// 핵심이다 — 이게 조용히 사라지거나 약해지면, 사용자가 보낸 반려동물/보호자와
+// 다르게 생긴 결과가 나와도 빌드/배포/로그 어디에도 안 남고 사용자 리포트로만
 // 발견된다(lookbook-ai에서 실제로 겪은 사고와 동일 패턴).
 // ────────────────────────────────────────────────────
-function buildPrompt(conceptId: string, hasOwnerImage: boolean): string {
+function buildPrompt(conceptId: string, hasBackgroundImage: boolean): string {
   const concept = CONCEPTS[conceptId] || CONCEPTS[DEFAULT_CONCEPT]
 
-  const subjects = hasOwnerImage
-    ? "Image 1 shows a pet, Image 2 shows the pet's owner (a person). Combine BOTH into a single natural photo of the owner together with their pet."
-    : 'Image 1 shows a pet. Create a single natural photo of this pet.'
+  const subjects = hasBackgroundImage
+    ? "Image 1 shows a pet. Image 2 shows the pet's owner (a person). Image 3 is a real photo of a place where they often spend time together (e.g. their home). Combine the pet and owner from Image 1 and Image 2 into a single natural photo set in the location shown in Image 3."
+    : "Image 1 shows a pet. Image 2 shows the pet's owner (a person). Combine BOTH into a single natural photo of the owner together with their pet."
 
   const petFidelity =
     'ABSOLUTE RULE — NEVER VIOLATE: the pet in the output must be the exact same animal as shown in Image 1 — identical breed, fur color, fur pattern and markings, ear shape, face, and eye color. Do not substitute a different breed, change its coat color or pattern, or generate a generic-looking animal. Every physical detail of the pet must be reproduced exactly as in the source photo — only its pose may adapt naturally to the new scene.'
 
-  const ownerFidelity = hasOwnerImage
-    ? "ABSOLUTE RULE — NEVER VIOLATE: the person in the output must be the exact same person as shown in Image 2 — identical face, facial features, hair, and skin tone. Do not alter their identity, age, or appearance. Only their pose and clothing may adapt naturally to the new scene; their face must remain clearly recognizable as the same person."
-    : ''
+  const ownerFidelity =
+    "ABSOLUTE RULE — NEVER VIOLATE: the person in the output must be the exact same person as shown in Image 2 — identical face, facial features, hair, and skin tone. Do not alter their identity, age, or appearance. Only their pose and clothing may adapt naturally to the new scene; their face must remain clearly recognizable as the same person."
 
-  const sceneInstruction = `SCENE: ${concept.promptFragment}`
+  const backgroundInstruction = hasBackgroundImage
+    ? "ABSOLUTE RULE — NEVER VIOLATE: use Image 3 ONLY as a reference for the location — its architecture, furniture, colors, lighting, and atmosphere. Recreate a similar-looking setting behind the pet and owner. Do NOT copy any people, pets, animals, text, or objects that already appear in Image 3 into the output — only the pet from Image 1 and the owner from Image 2 should appear as subjects."
+    : `SCENE: ${concept.promptFragment}`
 
-  const finalReminder = `FINAL OUTPUT: one single photorealistic image${
-    hasOwnerImage ? ' of the owner and their pet together' : ' of the pet'
-  }, naturally composited into the described scene. The pet's exact appearance${
-    hasOwnerImage ? " and the owner's exact face" : ''
-  } must be preserved with zero deviation from the source photo — this is the single most important requirement. No text, no watermark, no logos anywhere in the image.`
+  const finalReminder = `FINAL OUTPUT: one single photorealistic image of the owner and their pet together, naturally composited into the ${
+    hasBackgroundImage ? 'location from Image 3' : 'described scene'
+  }. The pet's exact appearance and the owner's exact face must be preserved with zero deviation from the source photos — this is the single most important requirement. No text, no watermark, no logos anywhere in the image.`
 
-  return [subjects, petFidelity, ownerFidelity, sceneInstruction, finalReminder].filter(Boolean).join(' ')
+  return [subjects, petFidelity, ownerFidelity, backgroundInstruction, finalReminder].filter(Boolean).join(' ')
 }
 
 async function updateJob(
@@ -202,12 +203,16 @@ generation.post('/start', async (c) => {
   const body = await c.req.json().catch(() => null)
   const petImage = body?.petImage
   const ownerImage = body?.ownerImage
+  const backgroundImage = body?.backgroundImage
   const conceptId = typeof body?.concept === 'string' && CONCEPTS[body.concept] ? body.concept : DEFAULT_CONCEPT
 
   if (!isDataUrl(petImage)) {
     return c.json({ error: '반려동물 사진이 필요합니다.', code: 'PET_IMAGE_REQUIRED' }, 400)
   }
-  const hasOwnerImage = isDataUrl(ownerImage)
+  if (!isDataUrl(ownerImage)) {
+    return c.json({ error: '보호자 사진이 필요합니다.', code: 'OWNER_IMAGE_REQUIRED' }, 400)
+  }
+  const hasBackgroundImage = isDataUrl(backgroundImage)
 
   if ((user as any).credits < GENERATION_CREDIT_COST) {
     return c.json({ error: '크레딧이 부족합니다.', code: 'INSUFFICIENT_CREDITS' }, 402)
@@ -235,14 +240,22 @@ generation.post('/start', async (c) => {
 
   await db
     .prepare(
-      `INSERT INTO generation_logs (id, user_id, owner_image_b64, pet_image_b64, output_type, concept, status, credits_used)
-       VALUES (?, ?, ?, ?, 'image', ?, 'pending', ?)`
+      `INSERT INTO generation_logs (id, user_id, owner_image_b64, pet_image_b64, background_image_b64, output_type, concept, status, credits_used)
+       VALUES (?, ?, ?, ?, ?, 'image', ?, 'pending', ?)`
     )
-    .bind(jobId, (user as any).id, hasOwnerImage ? ownerImage : null, petImage, conceptId, GENERATION_CREDIT_COST)
+    .bind(
+      jobId,
+      (user as any).id,
+      ownerImage,
+      petImage,
+      hasBackgroundImage ? backgroundImage : null,
+      conceptId,
+      GENERATION_CREDIT_COST
+    )
     .run()
 
-  const prompt = buildPrompt(conceptId, hasOwnerImage)
-  const images = hasOwnerImage ? [petImage, ownerImage] : [petImage]
+  const prompt = buildPrompt(conceptId, hasBackgroundImage)
+  const images = hasBackgroundImage ? [petImage, ownerImage, backgroundImage] : [petImage, ownerImage]
 
   c.executionCtx.waitUntil(runGenerationJob(db, c.env.ATLAS_API_KEY, jobId, (user as any).id, prompt, images))
 

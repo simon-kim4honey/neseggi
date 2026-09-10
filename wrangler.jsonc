@@ -10,15 +10,15 @@
     {
       "binding": "NESEGGI_DB",
       "database_name": "neseggi-staging",
-      "database_id": "REPLACE_WITH_STAGING_D1_ID",
-      "preview_database_id": "REPLACE_WITH_STAGING_D1_PREVIEW_ID"
+      "database_id": "c446437f-6bf9-4f5b-bec8-de695f1c1d4a",
+      "preview_database_id": "c622c98b-0665-49f6-abd7-2d4da5dcc4ba"
     }
   ],
   "kv_namespaces": [
     {
       "binding": "NESEGGI_KV",
-      "id": "REPLACE_WITH_STAGING_KV_ID",
-      "preview_id": "REPLACE_WITH_STAGING_KV_PREVIEW_ID"
+      "id": "16f126f4598a4066b7a39e27d5195ae8",
+      "preview_id": "134ffb584a894d048af2a469e0e37926"
     }
   ],
   "vars": {

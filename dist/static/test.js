@@ -265,7 +265,16 @@
   }
 
   // ── 1. 반려동물 프로필 ──
+  // 사진 여러 장(특히 10장 가까이)을 업로드할 때 서버 응답까지 몇 초 걸릴 수
+  // 있는데 버튼에 아무 반응이 없으면 사용자가 계속 눌러버려서, 그 사이 여러
+  // 번 클릭되면 pet이 중복 생성되거나 같은 사진이 중복 업로드될 수 있었다 —
+  // 버튼을 누르는 즉시 비활성화하고 진행 중 문구를 보여준다(중복 클릭 방지 +
+  // 눈에 보이는 반응).
+  let petNextSubmitting = false
+  const petNextBtn = document.getElementById('step-pet-next')
+  const petNextBtnDefaultText = petNextBtn.textContent
   document.getElementById('step-pet-next').addEventListener('click', async () => {
+    if (petNextSubmitting) return
     const name = document.getElementById('pet-name').value.trim()
     if (!name) {
       alert('이름을 입력해주세요.')
@@ -276,37 +285,47 @@
       return
     }
 
-    const species = speciesPromise ? await speciesPromise : ''
-    const personality = document.getElementById('pet-personality').value.trim()
+    petNextSubmitting = true
+    petNextBtn.disabled = true
+    petNextBtn.textContent = '등록하는 중...'
+    try {
+      const species = speciesPromise ? await speciesPromise : ''
+      const personality = document.getElementById('pet-personality').value.trim()
 
-    const { ok, data } = await api('/api/chat/pets', {
-      method: 'POST',
-      body: JSON.stringify({ petId: state.petId, name, species, personality }),
-    })
-    if (!ok) {
-      alert(data.error || '등록 실패')
-      return
-    }
-    state.petId = data.pet.id
-    state.petName = name
-    localStorage.setItem(PET_ID_KEY, state.petId)
-
-    // 뒤로 갔다가 다시 "다음단계"를 눌러도 이미 서버에 올라간 사진을 중복
-    // 업로드하지 않도록, 지난번 업로드 이후 새로 추가된 사진만 보낸다.
-    const newPhotos = state.petPhotos.slice(state.petPhotosUploadedCount)
-    if (newPhotos.length > 0) {
-      const uploadRes = await api('/api/chat/pets/' + state.petId + '/photos', {
+      const { ok, data } = await api('/api/chat/pets', {
         method: 'POST',
-        body: JSON.stringify({ images: newPhotos }),
+        body: JSON.stringify({ petId: state.petId, name, species, personality }),
       })
-      if (!uploadRes.ok) {
-        alert(uploadRes.data.error || '사진 업로드 실패')
+      if (!ok) {
+        alert(data.error || '등록 실패')
         return
       }
-      state.petPhotosUploadedCount = state.petPhotos.length
-    }
+      state.petId = data.pet.id
+      state.petName = name
+      localStorage.setItem(PET_ID_KEY, state.petId)
 
-    showStep('step-title')
+      // 뒤로 갔다가 다시 "다음단계"를 눌러도 이미 서버에 올라간 사진을 중복
+      // 업로드하지 않도록, 지난번 업로드 이후 새로 추가된 사진만 보낸다.
+      const newPhotos = state.petPhotos.slice(state.petPhotosUploadedCount)
+      if (newPhotos.length > 0) {
+        petNextBtn.textContent = '사진 업로드하는 중...'
+        const uploadRes = await api('/api/chat/pets/' + state.petId + '/photos', {
+          method: 'POST',
+          body: JSON.stringify({ images: newPhotos }),
+        })
+        if (!uploadRes.ok) {
+          alert(uploadRes.data.error || '사진 업로드 실패')
+          return
+        }
+        state.petPhotosUploadedCount = state.petPhotos.length
+      }
+
+      showStep('step-title')
+    } finally {
+      petNextSubmitting = false
+      petNextBtn.disabled = false
+      petNextBtn.textContent = petNextBtnDefaultText
+    }
   })
 
   // ── 2-1. 호칭 ──

@@ -176,6 +176,16 @@ body {
   display: block;
 }
 
+.chat-thumb-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff5f7;
+  border-style: dashed;
+  color: #b3798c;
+  font-size: 20px;
+}
+
 .lightbox-overlay {
   position: fixed;
   inset: 0;

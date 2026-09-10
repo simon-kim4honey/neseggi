@@ -357,28 +357,38 @@
   }
   lightboxOverlay.addEventListener('click', () => lightboxOverlay.classList.add('hidden'))
 
-  // 프로필 이미지 URL이 없거나(캐시된 예전 URL 만료 등) 로드에 실패하면
-  // 깨진 이미지 아이콘 대신 발바닥 이모지 아바타로 대체한다.
-  function makeAvatarEl() {
-    if (!state.petAvatarUrl) {
-      const fallback = document.createElement('div')
-      fallback.className = 'avatar-fallback'
-      fallback.textContent = '🐾'
-      return fallback
+  // AtlasCloud가 "완료" 상태를 반환한 직후에도 실제 파일이 CDN에 아직 다
+  // 전파되지 않아 이미지가 깨져서 뜨는 경우가 있었음(2026-09-10) — 로드
+  // 실패 시 캐시를 우회해서 잠깐 텀을 두고 재시도하고, 그래도 안 되면
+  // onGiveUp으로 대체 UI를 보여준다.
+  const IMAGE_LOAD_MAX_RETRIES = 10
+  const IMAGE_LOAD_RETRY_DELAY_MS = 3000
+  function setImageWithRetry(imgEl, url, attempt, onGiveUp) {
+    attempt = attempt || 0
+    imgEl.onerror = () => {
+      if (attempt < IMAGE_LOAD_MAX_RETRIES) {
+        setTimeout(() => setImageWithRetry(imgEl, url, attempt + 1, onGiveUp), IMAGE_LOAD_RETRY_DELAY_MS)
+      } else if (onGiveUp) {
+        onGiveUp()
+      }
     }
+    imgEl.src = attempt === 0 ? url : url + (url.includes('?') ? '&' : '?') + '_retry=' + attempt
+  }
+
+  function makeAvatarFallbackEl() {
+    const fallback = document.createElement('div')
+    fallback.className = 'avatar-fallback'
+    fallback.textContent = '🐾'
+    return fallback
+  }
+
+  // 프로필 이미지 URL이 없거나 로드에 실패하면 깨진 이미지 아이콘 대신
+  // 발바닥 이모지 아바타로 대체한다.
+  function makeAvatarEl() {
+    if (!state.petAvatarUrl) return makeAvatarFallbackEl()
     const avatar = document.createElement('img')
     avatar.className = 'w-8 h-8 rounded-full object-cover border flex-shrink-0'
-    avatar.src = state.petAvatarUrl
-    avatar.addEventListener(
-      'error',
-      () => {
-        const fallback = document.createElement('div')
-        fallback.className = 'avatar-fallback'
-        fallback.textContent = '🐾'
-        avatar.replaceWith(fallback)
-      },
-      { once: true }
-    )
+    setImageWithRetry(avatar, state.petAvatarUrl, 0, () => avatar.replaceWith(makeAvatarFallbackEl()))
     return avatar
   }
 
@@ -424,11 +434,18 @@
   function appendPetImageMessage(url) {
     const thumb = document.createElement('img')
     thumb.className = 'chat-thumb'
-    thumb.src = url
     thumb.alt = '생성된 사진'
     thumb.addEventListener('click', () => openLightbox(url))
     chatMessagesEl.appendChild(makePetMessageRow(thumb))
     chatScrollEl.scrollTop = chatScrollEl.scrollHeight
+
+    setImageWithRetry(thumb, url, 0, () => {
+      const fallback = document.createElement('div')
+      fallback.className = 'chat-thumb chat-thumb-fallback'
+      fallback.textContent = '🐾'
+      fallback.title = '사진을 불러오지 못했어요'
+      thumb.replaceWith(fallback)
+    })
   }
 
   function appendSystemNote(text) {

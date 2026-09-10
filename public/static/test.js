@@ -16,6 +16,7 @@
     // 바로 썸네일 메시지를 보낼 수 있도록 대기시켜두는 값들
     chatEntered: false,
     pendingImageUrl: null,
+    pendingImageCaption: null,
     pendingGenerationError: null,
   }
 
@@ -314,15 +315,23 @@
     }, 3000)
   }
 
-  function handleGeneratedImage(url) {
+  async function handleGeneratedImage(url) {
     localStorage.setItem(RESULT_URL_KEY, url)
     state.petAvatarUrl = url
     // 방금 생성된 이미지를 반려동물 프로필 대표사진으로도 저장
     api('/api/chat/pets', { method: 'POST', body: JSON.stringify({ petId: state.petId, avatarUrl: url }) })
+
+    // 사진을 그냥 던지지 않고, 반려동물이 곁들이는 짧은 한마디("어제 꿈에서
+    // 나왔던 장면이야" 같은)를 먼저 받아서 사진과 함께 보여준다.
+    const { ok, data } = await api('/api/chat/pets/' + state.petId + '/photo-caption', { method: 'POST' })
+    const caption = ok ? data.caption : null
+
     if (state.chatEntered) {
+      if (caption) appendMessage('pet', caption)
       appendPetImageMessage(url)
     } else {
       state.pendingImageUrl = url
+      state.pendingImageCaption = caption
     }
   }
 
@@ -449,8 +458,10 @@
     // 채팅으로 넘어오기 전에 이미 사진 생성이 끝났다면(또는 실패했다면)
     // 여기서 바로 반영한다.
     if (state.pendingImageUrl) {
+      if (state.pendingImageCaption) appendMessage('pet', state.pendingImageCaption)
       appendPetImageMessage(state.pendingImageUrl)
       state.pendingImageUrl = null
+      state.pendingImageCaption = null
     } else if (state.pendingGenerationError) {
       const errorMessage = typeof state.pendingGenerationError === 'string' ? state.pendingGenerationError : ''
       appendSystemNote('사진을 만드는 데 문제가 생겼어요' + (errorMessage ? ` (${errorMessage})` : ''))

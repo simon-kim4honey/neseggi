@@ -299,6 +299,69 @@ chat.post('/pets/:petId/greeting', async (c) => {
 })
 
 // ────────────────────────────────────────────────────
+// POST /api/chat/pets/:petId/photo-caption — 사진 합성이 끝났을 때, 그 사진을
+// 채팅에 썸네일로 보여주면서 반려동물이 곁들이는 짧은 한마디를 생성한다
+// (예: "어제 꿈에서 나왔던 장면이야"). 모델은 실제 이미지를 보지 않으므로
+// 사진 내용을 설명하게 하지 말고, 무지개나라에서의 한 순간을 사진으로
+// 보여주는 듯한 짧은 멘트만 받는다. 인사와 달리 매번 호출될 때마다 새로
+// 생성하고 대화 이력에 남긴다.
+// ────────────────────────────────────────────────────
+chat.post('/pets/:petId/photo-caption', async (c) => {
+  try {
+    const db = c.env.NESEGGI_DB
+    const token = c.req.header('X-Session-Token')
+    const user = await getSessionUser(db, token)
+    if (!user) return c.json({ error: '로그인이 필요합니다.', code: 'UNAUTHORIZED' }, 401)
+
+    const petId = c.req.param('petId')
+    const pet: any = await db
+      .prepare(`SELECT id, name, species, personality, owner_title FROM pets WHERE id = ? AND user_id = ?`)
+      .bind(petId, (user as any).id)
+      .first()
+    if (!pet) return c.json({ error: 'not_found' }, 404)
+
+    const persona = buildPersonaSystemPrompt({
+      name: pet.name,
+      species: pet.species,
+      personality: pet.personality,
+      ownerTitle: pet.owner_title,
+    })
+
+    const anthropic = new Anthropic({ apiKey: c.env.ANTHROPIC_API_KEY })
+    const response = await anthropic.messages.create({
+      model: CHAT_MODEL,
+      max_tokens: 300,
+      system: persona,
+      messages: [
+        {
+          role: 'user',
+          content:
+            '(방금 무지개나라에서 찍힌 사진 한 장을 보호자에게 보여주려는 순간이야. 사진에 정확히 뭐가 나왔는지 설명하지 말고, 사진을 짠 하고 보여주면서 건넬 짧은 한마디만 말해줘 — "어제 꿈에서 나왔던 장면이야", "여기서 이렇게 놀고 있었어" 같이, 무지개나라에서의 한 순간을 사진으로 보여주는 듯한 자연스러운 말투로.)',
+        },
+      ],
+    })
+
+    const captionText = response.content
+      .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+      .map((block) => block.text)
+      .join('\n')
+      .trim()
+
+    if (!captionText) return c.json({ error: '멘트 생성에 실패했습니다.', code: 'EMPTY_REPLY' }, 502)
+
+    await db
+      .prepare(`INSERT INTO chat_messages (pet_id, user_id, role, content) VALUES (?, ?, 'pet', ?)`)
+      .bind(petId, (user as any).id, captionText)
+      .run()
+
+    return c.json({ caption: captionText })
+  } catch (err: any) {
+    console.error('chat photo-caption error:', err)
+    return c.json({ error: '서버 오류가 발생했습니다.', code: 'INTERNAL_ERROR', message: err?.message }, 500)
+  }
+})
+
+// ────────────────────────────────────────────────────
 // POST /api/chat/pets/:petId/messages — 메시지 전송 → 반려동물 응답 자동 생성
 // body: { content: string }
 // ────────────────────────────────────────────────────

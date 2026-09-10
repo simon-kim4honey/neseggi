@@ -11,8 +11,6 @@ const generation = new Hono<{ Bindings: Bindings }>()
 
 const ATLAS_API_BASE = 'https://api.atlascloud.ai'
 const GENERATION_CREDIT_COST = 5
-const POLL_INTERVAL_MS = 3000
-const POLL_MAX_ATTEMPTS = 40 // waitUntil 백그라운드라 클라이언트 요청 타임아웃과 무관 — 최대 2분
 
 function atlasHeaders(apiKey: string) {
   return { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
@@ -102,16 +100,24 @@ function buildPrompt(conceptId: string, hasBackgroundImage: boolean): string {
 async function updateJob(
   db: D1Database,
   jobId: string,
-  fields: { status: string; result_url?: string; error_message?: string }
+  fields: { status: string; result_url?: string; error_message?: string; atlas_job_id?: string }
 ) {
   await db
     .prepare(
       `UPDATE generation_logs
        SET status = ?, result_url = COALESCE(?, result_url), error_message = COALESCE(?, error_message),
+           atlas_job_id = COALESCE(?, atlas_job_id),
            completed_at = CASE WHEN ? IN ('done', 'failed') THEN datetime('now') ELSE completed_at END
        WHERE id = ?`
     )
-    .bind(fields.status, fields.result_url ?? null, fields.error_message ?? null, fields.status, jobId)
+    .bind(
+      fields.status,
+      fields.result_url ?? null,
+      fields.error_message ?? null,
+      fields.atlas_job_id ?? null,
+      fields.status,
+      jobId
+    )
     .run()
 }
 
@@ -129,8 +135,24 @@ async function refundCredits(db: D1Database, userId: string, jobId: string, amou
     .run()
 }
 
-// AtlasCloud 생성 요청 → 폴링 → generation_logs 업데이트 (waitUntil로 백그라운드 실행)
-async function runGenerationJob(
+const TERMINAL_FAIL_STATUSES = new Set(['failed', 'timeout', 'canceled', 'error'])
+const JOB_STALE_MS = 5 * 60 * 1000 // 이 시간 넘게 processing인데 atlas_job_id도 없으면 타임아웃 처리
+
+function extractOutputUrl(pollRes: any): string | null {
+  const rawOut = pollRes?.data?.outputs ?? pollRes?.data?.output ?? pollRes?.data?.images ?? null
+  if (Array.isArray(rawOut)) {
+    return rawOut.find((u: any) => typeof u === 'string' && u.startsWith('http')) ?? null
+  }
+  return typeof rawOut === 'string' && rawOut.startsWith('http') ? rawOut : null
+}
+
+// AtlasCloud 생성 요청 1회 전송 (waitUntil로 백그라운드 실행). 완료까지 기다리지
+// 않고 job id만 받아서 저장한다 — 실제 완료 확인은 클라이언트가 /status를 호출할
+// 때마다 syncJobStatus()가 그때그때 짧게 조회한다. (예전엔 이 함수 안에서 최대
+// 2분짜리 폴링 루프를 돌렸는데, Cloudflare waitUntil의 실행시간 제한에 걸려
+// 루프 중간에 조용히 종료되고 job이 영원히 'processing'에 멈추는 문제가 실제로
+// 발생함— 2026-09-10 첫 실사진 테스트에서 확인. 짧은 요청 여러 번으로 바꿔서 해결.)
+async function startAtlasJob(
   db: D1Database,
   apiKey: string,
   jobId: string,
@@ -139,8 +161,6 @@ async function runGenerationJob(
   images: string[]
 ) {
   try {
-    await updateJob(db, jobId, { status: 'processing' })
-
     const startRes = await fetch(`${ATLAS_API_BASE}/api/v1/model/generateImage`, {
       method: 'POST',
       headers: atlasHeaders(apiKey),
@@ -162,48 +182,59 @@ async function runGenerationJob(
       await refundCredits(db, userId, jobId, GENERATION_CREDIT_COST)
       return
     }
-
-    const terminalFailStatuses = new Set(['failed', 'timeout', 'canceled', 'error'])
-    for (let i = 0; i < POLL_MAX_ATTEMPTS; i++) {
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
-      const pollRes: any = await fetch(`${ATLAS_API_BASE}/api/v1/model/prediction/${atlasJobId}`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      }).then((r) => r.json())
-
-      const status = pollRes?.data?.status
-      if (status === 'completed' || status === 'succeeded') {
-        const rawOut = pollRes.data?.outputs ?? pollRes.data?.output ?? pollRes.data?.images ?? null
-        const url: string | null = Array.isArray(rawOut)
-          ? rawOut.find((u: any) => typeof u === 'string' && u.startsWith('http')) ?? null
-          : typeof rawOut === 'string' && rawOut.startsWith('http')
-            ? rawOut
-            : null
-
-        if (url) {
-          await updateJob(db, jobId, { status: 'done', result_url: url })
-        } else {
-          console.error('generation completed but no output url:', jobId, pollRes)
-          await updateJob(db, jobId, { status: 'failed', error_message: '생성 결과를 받지 못했습니다.' })
-          await refundCredits(db, userId, jobId, GENERATION_CREDIT_COST)
-        }
-        return
-      }
-
-      if (terminalFailStatuses.has(status)) {
-        console.error('generation failed status:', jobId, status)
-        await updateJob(db, jobId, { status: 'failed', error_message: `AI 생성 실패 (${status})` })
-        await refundCredits(db, userId, jobId, GENERATION_CREDIT_COST)
-        return
-      }
-    }
-
-    console.error('generation polling timeout:', jobId)
-    await updateJob(db, jobId, { status: 'failed', error_message: '생성 시간 초과' })
-    await refundCredits(db, userId, jobId, GENERATION_CREDIT_COST)
+    await updateJob(db, jobId, { status: 'processing', atlas_job_id: atlasJobId })
   } catch (err: any) {
-    console.error('generation job error:', jobId, err)
+    console.error('generation start error:', jobId, err)
     await updateJob(db, jobId, { status: 'failed', error_message: err?.message || '서버 오류' })
     await refundCredits(db, userId, jobId, GENERATION_CREDIT_COST)
+  }
+}
+
+// GET /status 호출마다 한 번씩 AtlasCloud를 짧게 조회해서 상태를 동기화한다.
+async function syncJobStatus(db: D1Database, apiKey: string, job: any): Promise<any> {
+  if (job.status !== 'pending' && job.status !== 'processing') return job
+
+  if (!job.atlas_job_id) {
+    // start 요청이 아직(또는 실패로) atlas_job_id를 못 받은 상태 — 너무 오래 묵으면 타임아웃 처리
+    const ageMs = Date.now() - new Date(job.created_at + 'Z').getTime()
+    if (ageMs > JOB_STALE_MS) {
+      await updateJob(db, job.id, { status: 'failed', error_message: '생성 시작에 실패했습니다.' })
+      await refundCredits(db, job.user_id, job.id, GENERATION_CREDIT_COST)
+      return { ...job, status: 'failed', error_message: '생성 시작에 실패했습니다.' }
+    }
+    return job
+  }
+
+  try {
+    const pollRes: any = await fetch(`${ATLAS_API_BASE}/api/v1/model/prediction/${job.atlas_job_id}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    }).then((r) => r.json())
+
+    const status = pollRes?.data?.status
+    if (status === 'completed' || status === 'succeeded') {
+      const url = extractOutputUrl(pollRes)
+      if (url) {
+        await updateJob(db, job.id, { status: 'done', result_url: url })
+        return { ...job, status: 'done', result_url: url }
+      }
+      console.error('generation completed but no output url:', job.id, pollRes)
+      await updateJob(db, job.id, { status: 'failed', error_message: '생성 결과를 받지 못했습니다.' })
+      await refundCredits(db, job.user_id, job.id, GENERATION_CREDIT_COST)
+      return { ...job, status: 'failed', error_message: '생성 결과를 받지 못했습니다.' }
+    }
+
+    if (TERMINAL_FAIL_STATUSES.has(status)) {
+      console.error('generation failed status:', job.id, status)
+      await updateJob(db, job.id, { status: 'failed', error_message: `AI 생성 실패 (${status})` })
+      await refundCredits(db, job.user_id, job.id, GENERATION_CREDIT_COST)
+      return { ...job, status: 'failed', error_message: `AI 생성 실패 (${status})` }
+    }
+
+    return job // 아직 진행 중 — 다음 폴링에서 다시 확인
+  } catch (err: any) {
+    // 일시적 네트워크 오류 등 — job을 실패 처리하지 않고 다음 폴링에서 재시도
+    console.error('poll error:', job.id, err)
+    return job
   }
 }
 
@@ -274,7 +305,7 @@ generation.post('/start', async (c) => {
     const prompt = buildPrompt(conceptId, hasBackgroundImage)
     const images = hasBackgroundImage ? [petImage, ownerImage, backgroundImage] : [petImage, ownerImage]
 
-    c.executionCtx.waitUntil(runGenerationJob(db, c.env.ATLAS_API_KEY, jobId, (user as any).id, prompt, images))
+    c.executionCtx.waitUntil(startAtlasJob(db, c.env.ATLAS_API_KEY, jobId, (user as any).id, prompt, images))
 
     return c.json({ jobId, status: 'pending' }, 202)
   } catch (err: any) {
@@ -293,12 +324,17 @@ generation.get('/status/:jobId', async (c) => {
   if (!user) return c.json({ error: '로그인이 필요합니다.', code: 'UNAUTHORIZED' }, 401)
 
   const jobId = c.req.param('jobId')
-  const job: any = await db
-    .prepare('SELECT id, status, result_url, error_message, concept FROM generation_logs WHERE id = ? AND user_id = ?')
+  let job: any = await db
+    .prepare(
+      'SELECT id, user_id, status, result_url, error_message, concept, atlas_job_id, created_at FROM generation_logs WHERE id = ? AND user_id = ?'
+    )
     .bind(jobId, (user as any).id)
     .first()
 
   if (!job) return c.json({ error: 'not_found' }, 404)
+
+  job = await syncJobStatus(db, c.env.ATLAS_API_KEY, job)
+
   return c.json({
     jobId: job.id,
     status: job.status,

@@ -183,25 +183,47 @@ function extractOutputUrl(pollRes: any): string | null {
 // 판단 — 그래서 "시작" 요청만큼은 요청 처리 안에서 직접 기다리도록 바꿈.
 // 실제 완료 확인(폴링)은 여전히 클라이언트가 /status를 호출할 때마다
 // syncJobStatus()가 그때그때 짧게 조회한다.
+const ATLAS_START_TIMEOUT_MS = 25000
+
 async function startAtlasJob(
   apiKey: string,
   prompt: string,
   images: string[],
   thinkingLevel: string
 ): Promise<{ ok: true; atlasJobId: string } | { ok: false; message: string }> {
-  const startRes = await fetch(`${ATLAS_API_BASE}/api/v1/model/generateImage`, {
-    method: 'POST',
-    headers: atlasHeaders(apiKey),
-    body: JSON.stringify({
-      model: 'google/nano-banana-2/edit',
-      prompt,
-      aspect_ratio: '1:1',
-      resolution: '2k',
-      thinking_level: thinkingLevel,
-      output_format: 'jpeg',
-      images,
-    }),
-  })
+  // ⚠️ 타임아웃 없는 fetch가 무한정 걸려있는 문제가 실제로 재현됨(2026-09-10) —
+  // AtlasCloud가 응답을 안 주는지, 이미지 payload가 커서 오래 걸리는지 구분
+  // 안 되던 걸 AbortController로 명확한 타임아웃 에러로 바꿈.
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), ATLAS_START_TIMEOUT_MS)
+
+  let startRes: Response
+  try {
+    startRes = await fetch(`${ATLAS_API_BASE}/api/v1/model/generateImage`, {
+      method: 'POST',
+      headers: atlasHeaders(apiKey),
+      body: JSON.stringify({
+        model: 'google/nano-banana-2/edit',
+        prompt,
+        aspect_ratio: '1:1',
+        resolution: '2k',
+        thinking_level: thinkingLevel,
+        output_format: 'jpeg',
+        images,
+      }),
+      signal: controller.signal,
+    })
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      console.error(`generation start timed out after ${ATLAS_START_TIMEOUT_MS}ms`)
+      return { ok: false, message: 'AI 생성 요청이 응답하지 않습니다 (타임아웃)' }
+    }
+    console.error('generation start fetch error:', err)
+    return { ok: false, message: err?.message || 'AI 생성 요청 중 네트워크 오류' }
+  } finally {
+    clearTimeout(timeout)
+  }
+
   const startData: any = await startRes.json()
   const atlasJobId = startData?.data?.id
   if (startData?.code !== 200 || !atlasJobId) {

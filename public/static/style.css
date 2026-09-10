@@ -164,34 +164,34 @@ body {
   border-radius: 18px;
 }
 
-.hero-image {
-  width: 100%;
+/* 채팅 속 합성 사진 썸네일 — 채팅창 폭의 30%, 클릭하면 라이트박스로 확대 */
+.chat-thumb {
+  width: 30%;
   aspect-ratio: 1 / 1;
   object-fit: cover;
-  border-radius: 18px;
+  border-radius: 14px;
   border: 2px solid #fff;
-  box-shadow: 0 4px 16px rgba(232, 85, 133, 0.18);
+  box-shadow: 0 4px 14px rgba(232, 85, 133, 0.22);
+  cursor: pointer;
+  display: block;
 }
 
-.hero-image-fallback {
-  width: 100%;
-  aspect-ratio: 1 / 1;
-  border-radius: 18px;
-  border: 2px dashed #f0c7d3;
-  background: #fffafb;
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 10, 15, 0.85);
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  color: #b3798c;
+  padding: 24px;
+  z-index: 50;
+  cursor: zoom-out;
 }
-.hero-image-fallback span {
-  font-size: 32px;
-}
-.hero-image-fallback p {
-  font-size: 13px;
-  margin: 0;
+.lightbox-overlay img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 16px;
 }
 
 .avatar-fallback {

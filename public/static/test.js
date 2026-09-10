@@ -12,6 +12,11 @@
     petPhoto: null,
     ownerPhoto: null,
     bgPhoto: null,
+    // 채팅 화면으로 넘어가기 전에 사진 생성이 끝나버린 경우, 채팅 진입 후
+    // 바로 썸네일 메시지를 보낼 수 있도록 대기시켜두는 값들
+    chatEntered: false,
+    pendingImageUrl: null,
+    pendingGenerationError: null,
   }
 
   function getToken() {
@@ -39,6 +44,38 @@
       reader.onerror = reject
       reader.readAsDataURL(file)
     })
+  }
+
+  // Claude API/AtlasCloud 둘 다 image/avif, image/heic 같은 포맷은 지원하지
+  // 않아서 서버가 거절한다 — 캔버스에 그려서 JPEG로 변환한 뒤 업로드한다.
+  // (png/jpeg/webp는 이미 지원되는 포맷이라 변환 없이 그대로 사용)
+  async function normalizeImageFile(file) {
+    if (!file) return null
+    const type = (file.type || '').toLowerCase()
+    if (type === 'image/png' || type === 'image/jpeg' || type === 'image/jpg' || type === 'image/webp') {
+      return fileToDataUrl(file)
+    }
+    const objectUrl = URL.createObjectURL(file)
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const el = new Image()
+        el.onload = () => resolve(el)
+        el.onerror = reject
+        el.src = objectUrl
+      })
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth
+      canvas.height = img.naturalHeight
+      canvas.getContext('2d').drawImage(img, 0, 0)
+      return canvas.toDataURL('image/jpeg', 0.92)
+    } catch (err) {
+      // 브라우저가 이 포맷을 디코딩하지 못하면 원본을 그대로 시도 — 서버가
+      // 형식 오류로 거절하면 그때 사용자에게 알려진다.
+      console.error('image format conversion failed:', err)
+      return fileToDataUrl(file)
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+    }
   }
 
   // 파일 선택 즉시 썸네일 미리보기 — 업로드(=파일 선택)가 제대로 됐는지 눈으로 확인용
@@ -83,7 +120,7 @@
     petPhotoLabel.classList.add('hidden')
     petSpeciesHint.textContent = '종을 확인하고 있어요...'
 
-    state.petPhoto = await fileToDataUrl(file)
+    state.petPhoto = await normalizeImageFile(file)
     speciesPromise = api('/api/chat/classify-species', {
       method: 'POST',
       body: JSON.stringify({ image: state.petPhoto }),
@@ -205,7 +242,7 @@
   })
   document.getElementById('step-owner-photo-next').addEventListener('click', async () => {
     const file = document.getElementById('owner-photo').files[0]
-    state.ownerPhoto = file ? await fileToDataUrl(file) : null
+    state.ownerPhoto = file ? await normalizeImageFile(file) : null
     showStep('step-bg-photo')
   })
 
@@ -218,16 +255,25 @@
   })
   document.getElementById('step-bg-photo-next').addEventListener('click', async () => {
     const file = document.getElementById('bg-photo').files[0]
-    state.bgPhoto = file ? await fileToDataUrl(file) : null
+    state.bgPhoto = file ? await normalizeImageFile(file) : null
     startGeneration()
   })
 
   // ── 3. 사진 합성 ──
+  // "무지개 나라에서 우리 아이를 부르고 있어요.." 화면은 실제 생성 완료를
+  // 기다리지 않고 7초만 보여준 뒤 바로 채팅으로 넘어간다. 사진 생성은
+  // 백그라운드에서 계속 폴링하고, 완료되면 이미 시작된 채팅에 반려동물
+  // 메시지로 썸네일을 보낸다 — 보호자가 채팅을 하고 있는 동안 생성 시간을
+  // 벌 수 있어서 AtlasCloud 응답이 늦어져도 체감 대기시간이 줄어든다.
+  const GENERATING_SCREEN_MS = 7000
   const genStatusText = document.getElementById('gen-status-text')
 
   async function startGeneration() {
     showStep('step-generating')
     genStatusText.textContent = ''
+    state.chatEntered = false
+    state.pendingImageUrl = null
+    state.pendingGenerationError = null
 
     if (!state.petPhoto) {
       // 정상 흐름이면 1단계에서 이미 필수로 막혀서 여기 도달할 수 없다 —
@@ -250,68 +296,57 @@
       genStatusText.textContent = '오류: ' + (data.error || '생성 시작 실패')
       return
     }
-    pollGeneration(data.jobId)
+    pollGenerationInBackground(data.jobId)
+    setTimeout(() => enterChat(), GENERATING_SCREEN_MS)
   }
 
-  function pollGeneration(jobId) {
+  function pollGenerationInBackground(jobId) {
     const interval = setInterval(async () => {
       const { ok, data } = await api('/api/generate/status/' + jobId)
-      if (!ok) {
-        clearInterval(interval)
-        genStatusText.textContent = '상태 조회 실패'
-        return
-      }
+      if (!ok) return // 일시적 오류 — 다음 폴링에서 재시도
       if (data.status === 'done') {
         clearInterval(interval)
-        enterChat(data.resultUrl)
+        handleGeneratedImage(data.resultUrl)
       } else if (data.status === 'failed') {
         clearInterval(interval)
-        genStatusText.textContent = '실패: ' + (data.errorMessage || '알 수 없는 오류')
-      } else {
-        genStatusText.textContent = '상태: ' + data.status
+        handleGenerationFailed(data.errorMessage)
       }
     }, 3000)
+  }
+
+  function handleGeneratedImage(url) {
+    localStorage.setItem(RESULT_URL_KEY, url)
+    state.petAvatarUrl = url
+    // 방금 생성된 이미지를 반려동물 프로필 대표사진으로도 저장
+    api('/api/chat/pets', { method: 'POST', body: JSON.stringify({ petId: state.petId, avatarUrl: url }) })
+    if (state.chatEntered) {
+      appendPetImageMessage(url)
+    } else {
+      state.pendingImageUrl = url
+    }
+  }
+
+  function handleGenerationFailed(errorMessage) {
+    if (state.chatEntered) {
+      appendSystemNote('사진을 만드는 데 문제가 생겼어요' + (errorMessage ? ` (${errorMessage})` : ''))
+    } else {
+      state.pendingGenerationError = errorMessage || true
+    }
   }
 
   // ── 4. 채팅 ──
   const chatMessagesEl = document.getElementById('chat-messages')
   const chatScrollEl = document.getElementById('chat-scroll')
-  const chatHeroImage = document.getElementById('chat-hero-image')
-  const chatHeroImageFallback = document.getElementById('chat-hero-image-fallback')
   const chatInput = document.getElementById('chat-input')
   const chatSendBtn = document.getElementById('chat-send')
+  const lightboxOverlay = document.getElementById('image-lightbox')
+  const lightboxImg = document.getElementById('image-lightbox-img')
 
-  // AtlasCloud가 "완료" 상태를 반환한 직후에도 실제 파일이 CDN에 아직 다
-  // 준비되지 않아 깨진 이미지로 뜨는 경우가 있었음 — 로드 실패 시 캐시를
-  // 우회해서 잠깐 텀을 두고 재시도한다. 재시도를 다 써도 실패하면(예: 캐시에
-  // 남아있던 예전 URL이 만료된 경우) 빈 화면 대신 안내 문구를 보여준다.
-  // (2026-09-10: 기존 5회×2초=10초로는 CDN 전파를 못 기다리고 너무 일찍
-  // 포기하는 문제가 재현되어 10회×3초=30초로 늘림.)
-  const HERO_IMAGE_MAX_RETRIES = 10
-  const HERO_IMAGE_RETRY_DELAY_MS = 3000
-  function setHeroImage(url, attempt) {
-    if (!url) {
-      chatHeroImage.classList.add('hidden')
-      chatHeroImageFallback.classList.remove('hidden')
-      return
-    }
-    attempt = attempt || 0
-    const bust = url + (url.includes('?') ? '&' : '?') + '_retry=' + attempt
-    chatHeroImageFallback.classList.add('hidden')
-    chatHeroImage.onerror = () => {
-      if (attempt < HERO_IMAGE_MAX_RETRIES) {
-        setTimeout(() => setHeroImage(url, attempt + 1), HERO_IMAGE_RETRY_DELAY_MS)
-      } else {
-        chatHeroImage.classList.add('hidden')
-        chatHeroImageFallback.classList.remove('hidden')
-      }
-    }
-    chatHeroImage.onload = () => {
-      chatHeroImageFallback.classList.add('hidden')
-      chatHeroImage.classList.remove('hidden')
-    }
-    chatHeroImage.src = attempt === 0 ? url : bust
+  function openLightbox(url) {
+    lightboxImg.src = url
+    lightboxOverlay.classList.remove('hidden')
   }
+  lightboxOverlay.addEventListener('click', () => lightboxOverlay.classList.add('hidden'))
 
   // 프로필 이미지 URL이 없거나(캐시된 예전 URL 만료 등) 로드에 실패하면
   // 깨진 이미지 아이콘 대신 발바닥 이모지 아바타로 대체한다.
@@ -339,10 +374,24 @@
   }
 
   // 카카오톡처럼 반려동물 메시지는 위에 프로필 사진+이름을 붙여서 보여준다
-  function appendMessage(role, content) {
-    const isPet = role === 'pet'
+  function makePetMessageRow(contentEl) {
+    const row = document.createElement('div')
+    row.className = 'flex items-start gap-2'
+    row.appendChild(makeAvatarEl())
 
-    if (!isPet) {
+    const col = document.createElement('div')
+    const nameEl = document.createElement('div')
+    nameEl.className = 'text-xs text-gray-500 mb-1'
+    nameEl.textContent = state.petName || '반려동물'
+    col.appendChild(nameEl)
+    col.appendChild(contentEl)
+
+    row.appendChild(col)
+    return row
+  }
+
+  function appendMessage(role, content) {
+    if (role !== 'pet') {
       const div = document.createElement('div')
       div.className = 'text-right'
       const bubble = document.createElement('span')
@@ -354,34 +403,35 @@
       return
     }
 
-    const row = document.createElement('div')
-    row.className = 'flex items-start gap-2'
-
-    row.appendChild(makeAvatarEl())
-
-    const col = document.createElement('div')
-    const nameEl = document.createElement('div')
-    nameEl.className = 'text-xs text-gray-500 mb-1'
-    nameEl.textContent = state.petName || '반려동물'
-    col.appendChild(nameEl)
-
     const bubble = document.createElement('span')
     bubble.className = 'bubble-pet inline-block max-w-[80%]'
     bubble.textContent = content
-    col.appendChild(bubble)
-
-    row.appendChild(col)
-    chatMessagesEl.appendChild(row)
+    chatMessagesEl.appendChild(makePetMessageRow(bubble))
     chatScrollEl.scrollTop = chatScrollEl.scrollHeight
   }
 
-  async function enterChat(resultUrl) {
-    if (resultUrl) {
-      localStorage.setItem(RESULT_URL_KEY, resultUrl)
-      state.petAvatarUrl = resultUrl
-      // 방금 생성된 이미지를 반려동물 프로필 대표사진으로도 저장
-      api('/api/chat/pets', { method: 'POST', body: JSON.stringify({ petId: state.petId, avatarUrl: resultUrl }) })
-    }
+  // 사진 합성이 끝나면 반려동물 메시지로 썸네일을 보낸다 — 클릭하면 큰
+  // 이미지로 볼 수 있다.
+  function appendPetImageMessage(url) {
+    const thumb = document.createElement('img')
+    thumb.className = 'chat-thumb'
+    thumb.src = url
+    thumb.alt = '생성된 사진'
+    thumb.addEventListener('click', () => openLightbox(url))
+    chatMessagesEl.appendChild(makePetMessageRow(thumb))
+    chatScrollEl.scrollTop = chatScrollEl.scrollHeight
+  }
+
+  function appendSystemNote(text) {
+    const div = document.createElement('div')
+    div.className = 'text-center text-xs text-gray-400 py-1'
+    div.textContent = text
+    chatMessagesEl.appendChild(div)
+    chatScrollEl.scrollTop = chatScrollEl.scrollHeight
+  }
+
+  async function enterChat() {
+    state.chatEntered = true
     if (!state.petName || !state.petAvatarUrl) {
       const { ok, data } = await api('/api/chat/pets')
       const pet = ok ? (data.pets || []).find((p) => p.id === state.petId) : null
@@ -390,14 +440,22 @@
         state.petAvatarUrl = state.petAvatarUrl || pet.avatar_url
       }
     }
-    // 캐시된 URL이 만료됐을 수도 있으니 항상 다시 시도 — 실패하면
-    // setHeroImage가 재시도 후 안내 문구로 대체한다.
-    setHeroImage(state.petAvatarUrl)
     showStep('step-chat')
     chatMessagesEl.innerHTML = ''
 
     const { ok, data } = await api('/api/chat/pets/' + state.petId + '/greeting', { method: 'POST' })
     if (ok) (data.messages || []).forEach((m) => appendMessage(m.role, m.content))
+
+    // 채팅으로 넘어오기 전에 이미 사진 생성이 끝났다면(또는 실패했다면)
+    // 여기서 바로 반영한다.
+    if (state.pendingImageUrl) {
+      appendPetImageMessage(state.pendingImageUrl)
+      state.pendingImageUrl = null
+    } else if (state.pendingGenerationError) {
+      const errorMessage = typeof state.pendingGenerationError === 'string' ? state.pendingGenerationError : ''
+      appendSystemNote('사진을 만드는 데 문제가 생겼어요' + (errorMessage ? ` (${errorMessage})` : ''))
+      state.pendingGenerationError = null
+    }
   }
 
   let sending = false
@@ -446,8 +504,7 @@
     await ensureSession()
     if (state.petId) {
       // 이미 진행했던 반려동물이 있으면 바로 채팅으로 (프로필/사진 단계 생략)
-      const savedUrl = localStorage.getItem(RESULT_URL_KEY)
-      enterChat(savedUrl || null)
+      enterChat()
     } else {
       showStep('step-pet')
     }

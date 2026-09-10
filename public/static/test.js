@@ -277,6 +277,7 @@
   ]
   function showStep(id) {
     steps.forEach((s) => document.getElementById(s).classList.toggle('hidden', s !== id))
+    if (id === 'step-chat') syncChatScrollHeight()
   }
 
   // ── 1. 반려동물 프로필 ──
@@ -533,6 +534,24 @@
     lightboxImg.src = url
     lightboxOverlay.classList.remove('hidden')
   }
+
+  // 채팅 상단바(고정)와 입력창(고정) 사이의 실제 빈 공간에 맞춰 메시지
+  // 영역 높이를 매번 다시 계산한다 — 화면 크기, 사진 미리보기 유무 등으로
+  // 두 고정 바의 실제 높이가 달라져도 항상 입력창 바로 위까지 꽉 채우게
+  // 하려는 목적(고정값으로 두면 화면 크기에 따라 메시지 영역과 입력창
+  // 사이에 빈 공간이 생김).
+  const chatHeaderBarEl = document.querySelector('.chat-header-bar')
+  const chatInputBarEl = document.querySelector('.chat-input-bar')
+  function syncChatScrollHeight() {
+    if (document.getElementById('step-chat').classList.contains('hidden')) return
+    if (!chatHeaderBarEl || !chatInputBarEl || !chatScrollEl) return
+    const headerBottom = chatHeaderBarEl.getBoundingClientRect().bottom
+    const inputTop = chatInputBarEl.getBoundingClientRect().top
+    const available = inputTop - headerBottom
+    chatScrollEl.style.height = Math.max(available, 120) + 'px'
+  }
+  window.addEventListener('resize', syncChatScrollHeight)
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', syncChatScrollHeight)
   lightboxOverlay.addEventListener('click', () => lightboxOverlay.classList.add('hidden'))
 
   // AtlasCloud가 "완료" 상태를 반환한 직후에도 실제 파일이 CDN에 아직 다
@@ -769,6 +788,7 @@
     chatImageInput.value = ''
     chatImagePreview.classList.add('hidden')
     chatImagePreviewImg.src = ''
+    syncChatScrollHeight()
   }
   chatImageBtn.addEventListener('click', () => chatImageInput.click())
   chatImageInput.addEventListener('change', async () => {
@@ -777,6 +797,7 @@
     pendingChatImage = await normalizeImageFile(file)
     chatImagePreviewImg.src = pendingChatImage
     chatImagePreview.classList.remove('hidden')
+    syncChatScrollHeight()
   })
   chatImageRemove.addEventListener('click', clearPendingChatImage)
 

@@ -147,7 +147,7 @@ app.get('/test', (c) => {
         </section>
 
         {/* 4. 채팅 */}
-        <section id="step-chat" class="step step-inner hidden space-y-3 pb-20" data-group="chat">
+        <section id="step-chat" class="step step-inner hidden space-y-3" data-group="chat">
           {/* 카카오톡처럼 상단바(프로필 사진+이름 / 메뉴 버튼)를 두고, 앞으로
               추가되는 기능들은 계속 이 메뉴 안에 넣는다. */}
           <div class="chat-header-bar">
@@ -177,10 +177,12 @@ app.get('/test', (c) => {
             </div>
           </div>
 
-          {/* 메시지 영역은 뷰포트 높이 기준으로 최대 높이를 제한하고 내부에서만
-              스크롤되게 한다. 합성된 사진은 별도 큰 이미지가 아니라 반려동물
-              메시지의 썸네일로 온다. */}
-          <div id="chat-scroll" class="max-h-[50vh] overflow-y-auto space-y-3 pr-1">
+          {/* 메시지 영역 높이는 고정값이 아니라 JS(syncChatScrollHeight)가
+              상단바 바로 아래 ~ 입력창 바로 위 사이의 실제 빈 공간에 맞춰
+              매번 계산해서 채운다 — 화면 크기와 무관하게 항상 입력창에 딱
+              붙어 보이게 하려는 목적. 합성된 사진은 별도 큰 이미지가 아니라
+              반려동물 메시지의 썸네일로 온다. */}
+          <div id="chat-scroll" class="overflow-y-auto space-y-3 pr-1">
             <div id="chat-messages" class="p-3 space-y-2 text-sm"></div>
           </div>
           {/* 입력창은 화면(뷰포트) 가장 아래에 고정 — 스크롤을 해도 항상

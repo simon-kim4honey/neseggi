@@ -203,6 +203,46 @@ chat.get('/pets', async (c) => {
 })
 
 // ────────────────────────────────────────────────────
+// GET /api/chat/pets/:petId/avatar-proxy — 반려동물 대표사진(AtlasCloud
+// 원본 URL)을 우리 서버를 거쳐 스트리밍한다. <img src>가 AtlasCloud의 OSS
+// 호스트(atlas-media.oss-*.aliyuncs.com)를 직접 가리키면 일부 기기/네트워크
+// (특히 모바일)에서 이미지가 계속 깨져서 뜨는 사례가 반복 확인됐음 —
+// referrer/hotlink 정책이나 네트워크 경로 문제로 추정. 우리 도메인을 거쳐
+// 서버가 대신 가져와 전달하면 이 클래스의 실패를 우회할 수 있다.
+// <img> 태그는 커스텀 헤더를 보낼 수 없어서 세션 토큰은 쿼리 파라미터로도
+// 받는다.
+// ────────────────────────────────────────────────────
+chat.get('/pets/:petId/avatar-proxy', async (c) => {
+  try {
+    const db = c.env.NESEGGI_DB
+    const token = c.req.header('X-Session-Token') || c.req.query('token')
+    const user = await getSessionUser(db, token)
+    if (!user) return c.text('unauthorized', 401)
+
+    const petId = c.req.param('petId')
+    const pet: any = await db
+      .prepare(`SELECT avatar_url FROM pets WHERE id = ? AND user_id = ?`)
+      .bind(petId, (user as any).id)
+      .first()
+    if (!pet?.avatar_url) return c.text('not_found', 404)
+
+    const upstream = await fetch(pet.avatar_url)
+    if (!upstream.ok || !upstream.body) return c.text('upstream_error', 502)
+
+    return new Response(upstream.body, {
+      status: 200,
+      headers: {
+        'Content-Type': upstream.headers.get('content-type') || 'image/jpeg',
+        'Cache-Control': 'public, max-age=86400',
+      },
+    })
+  } catch (err: any) {
+    console.error('avatar-proxy error:', err)
+    return c.text('internal_error', 500)
+  }
+})
+
+// ────────────────────────────────────────────────────
 // GET /api/chat/pets/:petId/messages — 대화 이력 조회
 // ────────────────────────────────────────────────────
 chat.get('/pets/:petId/messages', async (c) => {

@@ -37,6 +37,14 @@
     return { ok: res.ok, status: res.status, data }
   }
 
+  // AtlasCloud OSS 호스트를 <img src>가 직접 가리키면 일부 기기/네트워크에서
+  // 이미지가 계속 깨져서 뜨는 문제가 반복 확인됨 — 우리 서버가 대신 가져와
+  // 스트리밍하는 프록시를 거치도록 우회한다. <img>는 커스텀 헤더를 못 보내서
+  // 토큰은 쿼리 파라미터로 붙인다.
+  function avatarProxyUrl(petId) {
+    return '/api/chat/pets/' + petId + '/avatar-proxy?token=' + encodeURIComponent(getToken() || '')
+  }
+
   function fileToDataUrl(file) {
     return new Promise((resolve, reject) => {
       if (!file) return resolve(null)
@@ -339,8 +347,10 @@
   async function handleGeneratedImage(url) {
     localStorage.setItem(RESULT_URL_KEY, url)
     state.petAvatarUrl = url
-    // 방금 생성된 이미지를 반려동물 프로필 대표사진으로도 저장
-    api('/api/chat/pets', { method: 'POST', body: JSON.stringify({ petId: state.petId, avatarUrl: url }) })
+    // 방금 생성된 이미지를 반려동물 프로필 대표사진으로도 저장 — 아래에서
+    // avatar-proxy가 이 값을 그대로 읽어오므로, 프록시 URL을 쓰기 전에
+    // 저장이 끝나길 기다린다(레이스 방지).
+    await api('/api/chat/pets', { method: 'POST', body: JSON.stringify({ petId: state.petId, avatarUrl: url }) })
 
     // 사진을 그냥 던지지 않고, 반려동물이 곁들이는 짧은 한마디("어제 꿈에서
     // 나왔던 장면이야" 같은)를 먼저 받아서 사진과 함께 보여준다.
@@ -349,7 +359,7 @@
 
     if (state.chatEntered) {
       if (caption) appendMessage('pet', caption)
-      appendPetImageMessage(url)
+      appendPetImageMessage()
     } else {
       state.pendingImageUrl = url
       state.pendingImageCaption = caption
@@ -406,10 +416,10 @@
   // 프로필 이미지 URL이 없거나 로드에 실패하면 깨진 이미지 아이콘 대신
   // 발바닥 이모지 아바타로 대체한다.
   function makeAvatarEl() {
-    if (!state.petAvatarUrl) return makeAvatarFallbackEl()
+    if (!state.petAvatarUrl || !state.petId) return makeAvatarFallbackEl()
     const avatar = document.createElement('img')
     avatar.className = 'w-8 h-8 rounded-full object-cover border flex-shrink-0'
-    setImageWithRetry(avatar, state.petAvatarUrl, 0, () => avatar.replaceWith(makeAvatarFallbackEl()))
+    setImageWithRetry(avatar, avatarProxyUrl(state.petId), 0, () => avatar.replaceWith(makeAvatarFallbackEl()))
     return avatar
   }
 
@@ -461,17 +471,18 @@
   // 글자씩 줄바꿈되는 기형적인 크기로 보이고, 재시도할 때마다 크기가
   // 요동쳐 깜빡이는 것처럼 보인다(2026-09-10). 채팅창 자체의 실제 픽셀
   // 너비를 JS로 계산해서 고정 px로 지정하면 이 순환 참조가 생기지 않는다.
-  function appendPetImageMessage(url) {
+  function appendPetImageMessage() {
+    const proxiedUrl = avatarProxyUrl(state.petId)
     const thumb = document.createElement('img')
     thumb.className = 'chat-thumb'
     thumb.alt = '생성된 사진'
     const thumbWidthPx = Math.max(72, Math.round(chatMessagesEl.clientWidth * 0.3))
     thumb.style.width = thumbWidthPx + 'px'
-    thumb.addEventListener('click', () => openLightbox(url))
+    thumb.addEventListener('click', () => openLightbox(proxiedUrl))
     chatMessagesEl.appendChild(makePetMessageRow(thumb))
     chatScrollEl.scrollTop = chatScrollEl.scrollHeight
 
-    setImageWithRetry(thumb, url, 0, () => {
+    setImageWithRetry(thumb, proxiedUrl, 0, () => {
       const fallback = document.createElement('div')
       fallback.className = 'chat-thumb chat-thumb-fallback'
       fallback.style.width = thumbWidthPx + 'px'
@@ -509,7 +520,7 @@
     // 여기서 바로 반영한다.
     if (state.pendingImageUrl) {
       if (state.pendingImageCaption) appendMessage('pet', state.pendingImageCaption)
-      appendPetImageMessage(state.pendingImageUrl)
+      appendPetImageMessage()
       state.pendingImageUrl = null
       state.pendingImageCaption = null
     } else if (state.pendingGenerationError) {

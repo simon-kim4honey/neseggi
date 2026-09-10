@@ -275,6 +275,7 @@
 
   // ── 4. 채팅 ──
   const chatMessagesEl = document.getElementById('chat-messages')
+  const chatScrollEl = document.getElementById('chat-scroll')
   const chatHeroImage = document.getElementById('chat-hero-image')
   const chatHeroImageFallback = document.getElementById('chat-hero-image-fallback')
   const chatInput = document.getElementById('chat-input')
@@ -284,6 +285,10 @@
   // 준비되지 않아 깨진 이미지로 뜨는 경우가 있었음 — 로드 실패 시 캐시를
   // 우회해서 잠깐 텀을 두고 재시도한다. 재시도를 다 써도 실패하면(예: 캐시에
   // 남아있던 예전 URL이 만료된 경우) 빈 화면 대신 안내 문구를 보여준다.
+  // (2026-09-10: 기존 5회×2초=10초로는 CDN 전파를 못 기다리고 너무 일찍
+  // 포기하는 문제가 재현되어 10회×3초=30초로 늘림.)
+  const HERO_IMAGE_MAX_RETRIES = 10
+  const HERO_IMAGE_RETRY_DELAY_MS = 3000
   function setHeroImage(url, attempt) {
     if (!url) {
       chatHeroImage.classList.add('hidden')
@@ -294,8 +299,8 @@
     const bust = url + (url.includes('?') ? '&' : '?') + '_retry=' + attempt
     chatHeroImageFallback.classList.add('hidden')
     chatHeroImage.onerror = () => {
-      if (attempt < 5) {
-        setTimeout(() => setHeroImage(url, attempt + 1), 2000)
+      if (attempt < HERO_IMAGE_MAX_RETRIES) {
+        setTimeout(() => setHeroImage(url, attempt + 1), HERO_IMAGE_RETRY_DELAY_MS)
       } else {
         chatHeroImage.classList.add('hidden')
         chatHeroImageFallback.classList.remove('hidden')
@@ -345,7 +350,7 @@
       bubble.textContent = content
       div.appendChild(bubble)
       chatMessagesEl.appendChild(div)
-      chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight
+      chatScrollEl.scrollTop = chatScrollEl.scrollHeight
       return
     }
 
@@ -367,7 +372,7 @@
 
     row.appendChild(col)
     chatMessagesEl.appendChild(row)
-    chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight
+    chatScrollEl.scrollTop = chatScrollEl.scrollHeight
   }
 
   async function enterChat(resultUrl) {

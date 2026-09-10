@@ -128,11 +128,16 @@ app.get('/test', (c) => {
 
         {/* 4. 채팅 */}
         <section id="step-chat" class="step step-inner hidden space-y-3" data-group="chat">
-          <div id="chat-messages" class="h-80 overflow-y-auto p-3 space-y-2 text-sm"></div>
-          <img id="chat-hero-image" class="hidden hero-image" />
-          <div id="chat-hero-image-fallback" class="hidden hero-image-fallback">
-            <span>🐾</span>
-            <p>사진을 불러오지 못했어요</p>
+          {/* 메시지 입력창은 항상 화면에 보여야 한다 — 메시지+이미지 영역은
+              뷰포트 높이 기준으로 최대 높이를 제한하고 내부에서만 스크롤되게
+              해서, 입력창을 보려고 페이지 전체를 스크롤할 필요가 없게 한다. */}
+          <div id="chat-scroll" class="max-h-[55vh] overflow-y-auto space-y-3 pr-1">
+            <div id="chat-messages" class="p-3 space-y-2 text-sm"></div>
+            <img id="chat-hero-image" class="hidden hero-image" />
+            <div id="chat-hero-image-fallback" class="hidden hero-image-fallback">
+              <span>🐾</span>
+              <p>사진을 불러오지 못했어요</p>
+            </div>
           </div>
           <div class="flex gap-2">
             <input id="chat-input" type="text" placeholder="메시지 입력..." class="input-field flex-1" />

@@ -105,7 +105,7 @@ app.get('/test', (c) => {
 
         {/* 3. 사진 합성 진행 중 */}
         <section id="step-generating" class="step hidden text-center space-y-3 py-16">
-          <p class="text-lg">사진을 만들고 있어요...</p>
+          <p class="text-lg">무지개 나라에서 우리 아이를 부르고 있어요..</p>
           <p id="gen-status-text" class="text-sm text-gray-500"></p>
         </section>
 

@@ -22,9 +22,13 @@ Cloudflare Workers/Pages + Hono + D1 + KV. EZlook(lookbook-ai)와 동일한
   프로필 → 보호자 프로필 → 합성 → 채팅 순으로 이어짐).
 - 가입 플로우: 사용자가 (본인/반려동물/배경) 사진을 입력하는 시점에 로그인이
   안 돼 있으면 그때 신규 가입 화면이 뜬다(선가입 후사용이 아니라, 사진 입력
-  →필요시 가입 →계속). `/test` QA 페이지는 이 흐름을 흉내내되 로그인 화면
-  없이 익명 세션을 자동 생성한다(실제 앱은 아직 이 자동 가입 UX를 어떻게
-  구현할지 미정 — 다음 세션에서 확인).
+  →필요시 가입 →계속). 실제 앱은 아직 이 자동 가입 UX를 어떻게 구현할지
+  미정 — 다음 세션에서 확인.
+- **`/test`는 더 이상 익명 세션을 자동 생성하지 않는다(2026-09-10 복원)** —
+  "오늘의 추억사진"(아래 참고)이 사용자별로 하루하루 이어지는 기능이라
+  매번 새로 만들어지는 익명 계정으로는 확인할 수 없어서, 실제 로그인 화면
+  (이메일 로그인/회원가입 + 카카오/구글)을 다시 붙였다. `step-login`이
+  첫 단계.
 
 ## 아키텍처
 
@@ -89,6 +93,35 @@ lookbook-ai와 달리 `src/index.tsx`는 얇게 유지하고, 도메인별로 �
 - `pets` (`migrations/0007`, `0008`) — 반려동물 프로필(이름/종/성격/대표사진/
   `owner_title`=보호자를 부르는 호칭)
 - `chat_messages` (`migrations/0007`) — 대화 이력(`role`: `user`|`pet`)
+- `pet_photos` (`migrations/0009`) — 반려동물 참고 사진 풀(최대 10장,
+  `MAX_PET_PHOTOS` in `chat.ts`). 온보딩 때 `POST /api/chat/pets/:petId/photos`로
+  올린 사진들을 KV(`pet_photo:{petId}:{photoId}`)에 **TTL 없이 영구** 저장
+  (gen_input의 14일 TTL과 다름 — 계속 재사용돼야 하는 자료라서). 사진
+  합성(`/api/generate/start`)과 "오늘의 추억사진"(아래) 둘 다 이 풀에서
+  매번 한 장을 랜덤으로 골라 쓴다(`generation.ts`의 `pickRandomPetPhoto`).
+- `generation_logs.pet_id` / `.source` / `.notified` (`migrations/0010`) —
+  기존 `generation_logs`에 반려동물 연결 + 수동(`manual`)/자동(`daily_memory`)
+  구분 + 채팅에 알렸는지(`notified`) 추가. "오늘의 추억사진" 1일1회 체크에
+  씀(같은 `pet_id`+`source='daily_memory'`로 오늘 날짜 row가 있는지 확인).
+
+## "오늘의 추억사진" (1일1회 자동 생성, 2026-09-10 추가)
+
+사용자가 채팅에 들어올 때마다(`enterChat()` → `checkDailyMemory()`)
+`POST /api/chat/pets/:petId/daily-memory`를 호출한다. 이 엔드포인트가
+체크+시작+마무리를 다 겸함(멱등) — 오늘 시도가 없으면 사진 풀에서 랜덤으로
+한 장 + 랜덤 컨셉으로 새 생성을 시작하고, 이미 있으면 상태에 따라 폴링을
+유도하거나(processing) 완료된 걸 채팅에 한 번만 알린다(notified 플래그).
+크레딧을 차감하지 않는다(자동으로 주어지는 보너스 기능이라서). 채팅 메시지로는
+페르소나 캡션 텍스트만 대화 이력에 남고, 썸네일 이미지 자체는(다른 합성
+사진들처럼) 대화 이력에 재구성되지 않는다 — 같은 날 다시 채팅을 열면 캡션
+텍스트는 히스토리에 보이지만 썸네일은 그 세션에서 막 생성됐을 때만 보인다
+(알려진 한계, 이미지 메시지 타입을 따로 만들면 해결 가능하나 아직 안 함).
+
+어드민 전용 조회: `GET /api/admin/users/:userId/pets`(사진 풀 장수 포함),
+`GET /api/admin/pets/:petId/photos`(목록), `GET /api/admin/pets/:petId/photos/:photoId/image`
+(실제 이미지, KV에서 디코딩해서 스트리밍) — `X-Admin-Password` 헤더 필요.
+아직 별도의 시각적 어드민 페이지는 없음(JSON API만) — 있으면 좋겠으면
+다음 세션에서 요청할 것.
 
 ## ⚠️ `c.executionCtx.waitUntil`은 이 Cloudflare Pages 환경에서 신뢰할 수 없다
 

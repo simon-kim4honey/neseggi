@@ -41,29 +41,53 @@ app.get('/', (c) => {
 
 // ────────────────────────────────────────────────────
 // /test — QA용 테스트 화면. 실제 서비스는 앱(모바일)이고 이 페이지는 최종
-// 사용자 UI가 아니다 — API가 curl 없이도 브라우저에서 단계별로(우리 아이
-// 프로필 → 보호자 프로필 → 사진 합성 → 채팅) 검증 가능하도록 만든 임시 도구.
-// 로그인 화면 없음 — 접속하면 내부적으로 익명 세션을 자동 생성한다.
+// 사용자 UI가 아니다 — API가 curl 없이도 브라우저에서 단계별로(로그인 →
+// 우리 아이 프로필 → 보호자 프로필 → 사진 합성 → 채팅) 검증 가능하도록
+// 만든 임시 도구. "오늘의 추억사진"(1일1회 자동 생성)이 사용자별로 이어지는
+// 기능이라 익명 세션 자동 생성 대신 실제 로그인을 쓴다.
 // ────────────────────────────────────────────────────
 app.get('/test', (c) => {
   return c.render(
     <>
       <div id="test-app" class="max-w-md mx-auto">
         <div id="progress-dots">
+          <span data-group="login"></span>
           <span data-group="pet"></span>
           <span data-group="owner"></span>
           <span data-group="gen"></span>
           <span data-group="chat"></span>
         </div>
 
+        {/* 0. 로그인 */}
+        <section id="step-login" class="step step-inner space-y-3" data-group="login">
+          <h2 class="text-lg font-bold">로그인</h2>
+          <p class="text-xs text-gray-400">⚠️ QA 테스트 화면입니다. 실제 서비스는 앱으로 제공됩니다.</p>
+          <input id="login-name" type="text" placeholder="이름 (회원가입 시)" class="input-field" />
+          <input id="login-email" type="email" placeholder="이메일" class="input-field" />
+          <input id="login-password" type="password" placeholder="비밀번호" class="input-field" />
+          <p id="login-error" class="text-xs text-red-500"></p>
+          <div class="flex gap-2">
+            <button id="login-submit" class="btn-secondary flex-1">로그인</button>
+            <button id="signup-submit" class="btn-primary flex-1">회원가입</button>
+          </div>
+          <div class="flex items-center gap-2 py-1">
+            <div class="flex-1 border-t border-gray-200"></div>
+            <span class="text-xs text-gray-400">또는</span>
+            <div class="flex-1 border-t border-gray-200"></div>
+          </div>
+          <button id="login-kakao" class="btn-secondary w-full">카카오로 로그인</button>
+          <button id="login-google" class="btn-secondary w-full">구글로 로그인</button>
+        </section>
+
         {/* 1. 우리 아이 프로필 */}
-        <section id="step-pet" class="step step-inner space-y-3" data-group="pet">
+        <section id="step-pet" class="step step-inner hidden space-y-3" data-group="pet">
           <h2 class="text-lg font-bold">우리 아이 프로필 🐾</h2>
           <label for="pet-photo" class="photo-drop block">
-            <img id="pet-photo-preview" class="hidden photo-preview mx-auto mb-2" />
-            <span id="pet-photo-label">반려동물 사진을 올려주세요</span>
+            <span id="pet-photo-label">반려동물 사진을 올려주세요 (최대 10장)</span>
           </label>
-          <input id="pet-photo" type="file" accept="image/*" class="hidden" />
+          <input id="pet-photo" type="file" accept="image/*" multiple class="hidden" />
+          <div id="pet-photo-grid" class="flex flex-wrap gap-2"></div>
+          <p id="pet-photo-count" class="text-xs text-gray-400"></p>
           <p id="pet-species-hint" class="text-xs text-gray-400 -mt-1"></p>
           <input id="pet-name" type="text" placeholder="이름 (예: 콩이)" class="input-field" />
           <input id="pet-personality" type="text" placeholder="성격/말투" class="input-field" />

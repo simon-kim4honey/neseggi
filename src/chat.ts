@@ -1,25 +1,37 @@
 import { Hono } from 'hono'
 import Anthropic from '@anthropic-ai/sdk'
 import { getSessionUser } from './auth'
+import { CONCEPTS, buildPrompt, startAtlasJob, newJobId, updateJob, pickRandomPetPhoto } from './generation'
 
 type Bindings = {
   NESEGGI_DB: D1Database
+  NESEGGI_KV: KVNamespace
   ANTHROPIC_API_KEY: string
+  ATLAS_API_KEY: string
 }
 
 const chat = new Hono<{ Bindings: Bindings }>()
 
 const CHAT_MODEL = 'claude-opus-5'
 const MAX_HISTORY_MESSAGES = 30 // 컨텍스트로 넘길 최근 대화 수 (사용자+반려동물 합산)
+const MAX_PET_PHOTOS = 10
 
 function newPetId(): string {
   return `p_${crypto.randomUUID().replace(/-/g, '')}`
+}
+
+function newPetPhotoId(): string {
+  return `pp_${crypto.randomUUID().replace(/-/g, '')}`
 }
 
 function parseDataUrl(dataUrl: string): { mediaType: string; base64: string } | null {
   const match = /^data:(image\/(?:png|jpe?g|webp));base64,(.+)$/.exec(dataUrl)
   if (!match) return null
   return { mediaType: match[1], base64: match[2] }
+}
+
+function isDataUrl(v: unknown): v is string {
+  return typeof v === 'string' && /^data:image\/(png|jpe?g|webp);base64,/.test(v)
 }
 
 // ────────────────────────────────────────────────────
@@ -69,6 +81,28 @@ function buildPersonaSystemPrompt(pet: {
   ]
     .filter(Boolean)
     .join(' ')
+}
+
+// 페르소나 시스템 프롬프트 + 짧은 지시문으로 반려동물의 한 마디를 생성한다.
+// 인사말(/greeting)과 사진 캡션(/photo-caption, "오늘의 추억사진")이
+// 공유하는 핵심 로직 — 모델 호출부만 한 곳에 모아 중복을 없앤다.
+async function generatePersonaLine(
+  anthropic: Anthropic,
+  persona: string,
+  instruction: string,
+  maxTokens = 300
+): Promise<string> {
+  const response = await anthropic.messages.create({
+    model: CHAT_MODEL,
+    max_tokens: maxTokens,
+    system: persona,
+    messages: [{ role: 'user', content: instruction }],
+  })
+  return response.content
+    .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n')
+    .trim()
 }
 
 // ────────────────────────────────────────────────────
@@ -203,14 +237,89 @@ chat.get('/pets', async (c) => {
 })
 
 // ────────────────────────────────────────────────────
-// GET /api/chat/pets/:petId/avatar-proxy — 반려동물 대표사진(AtlasCloud
-// 원본 URL)을 우리 서버를 거쳐 스트리밍한다. <img src>가 AtlasCloud의 OSS
-// 호스트(atlas-media.oss-*.aliyuncs.com)를 직접 가리키면 일부 기기/네트워크
+// POST /api/chat/pets/:petId/photos — 반려동물 참고 사진 풀에 사진 추가
+// (최대 10장). body: { images: dataUrl[] }. 여기 쌓인 사진들이 사진 합성
+// (POST /api/generate/start)과 "오늘의 추억사진"(daily-memory) 둘 다의
+// 재료가 된다 — 매번 이 중 한 장을 랜덤으로 골라 AtlasCloud에 보낸다.
+// ────────────────────────────────────────────────────
+chat.post('/pets/:petId/photos', async (c) => {
+  try {
+    const db = c.env.NESEGGI_DB
+    const token = c.req.header('X-Session-Token')
+    const user = await getSessionUser(db, token)
+    if (!user) return c.json({ error: '로그인이 필요합니다.', code: 'UNAUTHORIZED' }, 401)
+
+    const petId = c.req.param('petId')
+    const pet = await db.prepare(`SELECT id FROM pets WHERE id = ? AND user_id = ?`).bind(petId, (user as any).id).first()
+    if (!pet) return c.json({ error: 'not_found' }, 404)
+
+    const body = await c.req.json().catch(() => null)
+    const images = Array.isArray(body?.images) ? body.images.filter(isDataUrl) : []
+    if (images.length === 0) return c.json({ error: '이미지가 필요합니다.', code: 'IMAGE_REQUIRED' }, 400)
+
+    const existingCount: any = await db
+      .prepare('SELECT COUNT(*) AS n FROM pet_photos WHERE pet_id = ?')
+      .bind(petId)
+      .first()
+    const remaining = MAX_PET_PHOTOS - (existingCount?.n ?? 0)
+    if (remaining <= 0) {
+      return c.json({ error: `사진은 최대 ${MAX_PET_PHOTOS}장까지만 올릴 수 있어요.`, code: 'PHOTO_LIMIT' }, 400)
+    }
+    const toStore = images.slice(0, remaining)
+
+    // 온보딩 때만 쓰고 버리는 gen_input과 달리, 이 사진 풀은 계속 재사용돼야
+    // 하므로 TTL 없이 영구 저장한다.
+    for (const image of toStore) {
+      const photoId = newPetPhotoId()
+      const kvKey = `pet_photo:${petId}:${photoId}`
+      await c.env.NESEGGI_KV.put(kvKey, image)
+      await db
+        .prepare(`INSERT INTO pet_photos (id, pet_id, user_id, kv_key) VALUES (?, ?, ?, ?)`)
+        .bind(photoId, petId, (user as any).id, kvKey)
+        .run()
+    }
+
+    const newCount: any = await db.prepare('SELECT COUNT(*) AS n FROM pet_photos WHERE pet_id = ?').bind(petId).first()
+    return c.json({ count: newCount?.n ?? 0, stored: toStore.length, skipped: images.length - toStore.length }, 201)
+  } catch (err: any) {
+    console.error('chat/pets/photos error:', err)
+    return c.json({ error: '서버 오류가 발생했습니다.', code: 'INTERNAL_ERROR', message: err?.message }, 500)
+  }
+})
+
+// ────────────────────────────────────────────────────
+// GET /api/chat/pets/:petId/photos — 반려동물 사진 풀 목록(개수 확인용)
+// ────────────────────────────────────────────────────
+chat.get('/pets/:petId/photos', async (c) => {
+  const db = c.env.NESEGGI_DB
+  const token = c.req.header('X-Session-Token')
+  const user = await getSessionUser(db, token)
+  if (!user) return c.json({ error: '로그인이 필요합니다.', code: 'UNAUTHORIZED' }, 401)
+
+  const petId = c.req.param('petId')
+  const pet = await db.prepare(`SELECT id FROM pets WHERE id = ? AND user_id = ?`).bind(petId, (user as any).id).first()
+  if (!pet) return c.json({ error: 'not_found' }, 404)
+
+  const { results } = await db
+    .prepare('SELECT id, created_at FROM pet_photos WHERE pet_id = ? ORDER BY created_at ASC')
+    .bind(petId)
+    .all()
+
+  return c.json({ photos: results ?? [] })
+})
+
+// ────────────────────────────────────────────────────
+// GET /api/chat/pets/:petId/avatar-proxy — 반려동물 이미지를 우리 서버를
+// 거쳐 스트리밍한다. <img src>가 AtlasCloud의 OSS 호스트
+// (atlas-media.oss-*.aliyuncs.com)를 직접 가리키면 일부 기기/네트워크
 // (특히 모바일)에서 이미지가 계속 깨져서 뜨는 사례가 반복 확인됐음 —
 // referrer/hotlink 정책이나 네트워크 경로 문제로 추정. 우리 도메인을 거쳐
 // 서버가 대신 가져와 전달하면 이 클래스의 실패를 우회할 수 있다.
 // <img> 태그는 커스텀 헤더를 보낼 수 없어서 세션 토큰은 쿼리 파라미터로도
 // 받는다.
+// jobId를 주면 대표 프로필 사진(pets.avatar_url) 대신 그 생성 job의
+// result_url을 보여준다 — "오늘의 추억사진"처럼 프로필과는 별개로 채팅에만
+// 올라오는 사진을 보여줄 때 쓴다.
 // ────────────────────────────────────────────────────
 chat.get('/pets/:petId/avatar-proxy', async (c) => {
   try {
@@ -220,13 +329,25 @@ chat.get('/pets/:petId/avatar-proxy', async (c) => {
     if (!user) return c.text('unauthorized', 401)
 
     const petId = c.req.param('petId')
-    const pet: any = await db
-      .prepare(`SELECT avatar_url FROM pets WHERE id = ? AND user_id = ?`)
-      .bind(petId, (user as any).id)
-      .first()
-    if (!pet?.avatar_url) return c.text('not_found', 404)
+    const jobId = c.req.query('jobId')
 
-    const upstream = await fetch(pet.avatar_url)
+    let sourceUrl: string | null = null
+    if (jobId) {
+      const job: any = await db
+        .prepare('SELECT result_url FROM generation_logs WHERE id = ? AND pet_id = ? AND user_id = ?')
+        .bind(jobId, petId, (user as any).id)
+        .first()
+      sourceUrl = job?.result_url ?? null
+    } else {
+      const pet: any = await db
+        .prepare(`SELECT avatar_url FROM pets WHERE id = ? AND user_id = ?`)
+        .bind(petId, (user as any).id)
+        .first()
+      sourceUrl = pet?.avatar_url ?? null
+    }
+    if (!sourceUrl) return c.text('not_found', 404)
+
+    const upstream = await fetch(sourceUrl)
     if (!upstream.ok || !upstream.body) return c.text('upstream_error', 502)
 
     return new Response(upstream.body, {
@@ -369,24 +490,11 @@ chat.post('/pets/:petId/photo-caption', async (c) => {
     })
 
     const anthropic = new Anthropic({ apiKey: c.env.ANTHROPIC_API_KEY })
-    const response = await anthropic.messages.create({
-      model: CHAT_MODEL,
-      max_tokens: 300,
-      system: persona,
-      messages: [
-        {
-          role: 'user',
-          content:
-            '(방금 무지개나라에서 찍힌 사진 한 장을 보호자에게 보여주려는 순간이야. 사진에 정확히 뭐가 나왔는지 설명하지 말고, 사진을 짠 하고 보여주면서 건넬 짧은 한마디만 말해줘 — "어제 꿈에서 나왔던 장면이야", "여기서 이렇게 놀고 있었어" 같이, 무지개나라에서의 한 순간을 사진으로 보여주는 듯한 자연스러운 말투로.)',
-        },
-      ],
-    })
-
-    const captionText = response.content
-      .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-      .map((block) => block.text)
-      .join('\n')
-      .trim()
+    const captionText = await generatePersonaLine(
+      anthropic,
+      persona,
+      '(방금 무지개나라에서 찍힌 사진 한 장을 보호자에게 보여주려는 순간이야. 사진에 정확히 뭐가 나왔는지 설명하지 말고, 사진을 짠 하고 보여주면서 건넬 짧은 한마디만 말해줘 — "어제 꿈에서 나왔던 장면이야", "여기서 이렇게 놀고 있었어" 같이, 무지개나라에서의 한 순간을 사진으로 보여주는 듯한 자연스러운 말투로.)'
+    )
 
     if (!captionText) return c.json({ error: '멘트 생성에 실패했습니다.', code: 'EMPTY_REPLY' }, 502)
 
@@ -398,6 +506,106 @@ chat.post('/pets/:petId/photo-caption', async (c) => {
     return c.json({ caption: captionText })
   } catch (err: any) {
     console.error('chat photo-caption error:', err)
+    return c.json({ error: '서버 오류가 발생했습니다.', code: 'INTERNAL_ERROR', message: err?.message }, 500)
+  }
+})
+
+// ────────────────────────────────────────────────────
+// POST /api/chat/pets/:petId/daily-memory — "오늘의 추억사진" (1일1회).
+// 사용자가 채팅에 들어올 때마다 호출하는 걸 전제로 한 체크+시작+마무리
+// 겸용 엔드포인트 — 하루에 한 번만 실제로 생성을 시작하고, 나머지 호출은
+// 상태만 알려주거나 아무것도 하지 않는다(멱등):
+//
+// - 오늘 시도가 없으면: 사진 풀에서 한 장을 랜덤으로 골라(다른 컨셉도
+//   랜덤으로) AtlasCloud 생성을 시작하고 processing으로 응답한다.
+// - 오늘 시도가 있고 아직 진행 중이면: 그 job 상태만 알려준다(클라이언트가
+//   /api/generate/status로 폴링해야 함).
+// - 오늘 시도가 완료(done)됐는데 아직 채팅에 못 알렸으면(notified=0):
+//   여기서 페르소나 멘트를 생성해 채팅 메시지로 남기고 notified=1로 표시,
+//   caption과 jobId를 반환한다 — 클라이언트는 이걸로 캡션+썸네일을 보여준다.
+// - 이미 알렸으면(notified=1): alreadyShown만 알려주고 아무 것도 안 한다.
+//
+// 크레딧을 차감하지 않는다 — 사용자가 직접 요청한 합성이 아니라 자동으로
+// 주어지는 보너스 기능이라서.
+// ────────────────────────────────────────────────────
+chat.post('/pets/:petId/daily-memory', async (c) => {
+  try {
+    const db = c.env.NESEGGI_DB
+    const token = c.req.header('X-Session-Token')
+    const user = await getSessionUser(db, token)
+    if (!user) return c.json({ error: '로그인이 필요합니다.', code: 'UNAUTHORIZED' }, 401)
+
+    const petId = c.req.param('petId')
+    const pet: any = await db
+      .prepare(`SELECT id, name, species, personality, owner_title FROM pets WHERE id = ? AND user_id = ?`)
+      .bind(petId, (user as any).id)
+      .first()
+    if (!pet) return c.json({ error: 'not_found' }, 404)
+
+    const today: any = await db
+      .prepare(
+        `SELECT id, status, notified FROM generation_logs
+         WHERE pet_id = ? AND source = 'daily_memory' AND date(created_at) = date('now')
+         ORDER BY created_at DESC LIMIT 1`
+      )
+      .bind(petId)
+      .first()
+
+    if (today) {
+      if (today.status === 'done' && !today.notified) {
+        const persona = buildPersonaSystemPrompt({
+          name: pet.name,
+          species: pet.species,
+          personality: pet.personality,
+          ownerTitle: pet.owner_title,
+        })
+        const anthropic = new Anthropic({ apiKey: c.env.ANTHROPIC_API_KEY })
+        const captionText = await generatePersonaLine(
+          anthropic,
+          persona,
+          '(오늘 하루에 한 번, 무지개나라에서 문득 찍힌 "오늘의 추억사진" 한 장을 보호자에게 깜짝 보여주는 순간이야. 사진에 정확히 뭐가 나왔는지 설명하지 말고, 오늘 있었던 일이나 기분을 담아 사진을 보여주며 건넬 짧은 한마디만 말해줘 — 무지개나라에서의 오늘 하루를 자연스럽게 나누는 느낌으로.)'
+        )
+        if (captionText) {
+          await db
+            .prepare(`INSERT INTO chat_messages (pet_id, user_id, role, content) VALUES (?, ?, 'pet', ?)`)
+            .bind(petId, (user as any).id, captionText)
+            .run()
+          await db.prepare(`UPDATE generation_logs SET notified = 1 WHERE id = ?`).bind(today.id).run()
+        }
+        return c.json({ status: 'done', jobId: today.id, resultReady: !!captionText, caption: captionText || null })
+      }
+      if (today.status === 'done' && today.notified) {
+        return c.json({ status: 'done', jobId: today.id, resultReady: false, alreadyShown: true })
+      }
+      return c.json({ status: today.status, jobId: today.id, resultReady: false })
+    }
+
+    const picked = await pickRandomPetPhoto(db, c.env.NESEGGI_KV, petId, (user as any).id)
+    if (!picked) return c.json({ status: 'no_photos' })
+
+    const conceptIds = Object.keys(CONCEPTS)
+    const conceptId = conceptIds[Math.floor(Math.random() * conceptIds.length)]
+    const jobId = newJobId()
+    const prompt = buildPrompt(conceptId, false, false)
+
+    await db
+      .prepare(
+        `INSERT INTO generation_logs (id, user_id, pet_id, pet_image_b64, output_type, concept, status, credits_used, source)
+         VALUES (?, ?, ?, ?, 'image', ?, 'pending', 0, 'daily_memory')`
+      )
+      .bind(jobId, (user as any).id, petId, picked.kvKey, conceptId)
+      .run()
+
+    const started = await startAtlasJob(c.env.ATLAS_API_KEY, prompt, [picked.dataUrl], 'default')
+    if (!started.ok) {
+      await updateJob(db, jobId, { status: 'failed', error_message: started.message })
+      return c.json({ status: 'failed' })
+    }
+    await updateJob(db, jobId, { status: 'processing', atlas_job_id: started.atlasJobId })
+
+    return c.json({ status: 'processing', jobId })
+  } catch (err: any) {
+    console.error('daily-memory error:', err)
     return c.json({ error: '서버 오류가 발생했습니다.', code: 'INTERNAL_ERROR', message: err?.message }, 500)
   }
 })

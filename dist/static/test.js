@@ -4,12 +4,15 @@
   const PET_ID_KEY = 'neseggi_test_pet_id'
   const RESULT_URL_KEY = 'neseggi_test_result_url'
 
+  const MAX_PET_PHOTOS = 10
+
   const state = {
     petId: localStorage.getItem(PET_ID_KEY) || null,
     petName: null,
     petAvatarUrl: localStorage.getItem(RESULT_URL_KEY) || null,
     ownerTitle: null,
-    petPhoto: null,
+    petPhotos: [], // 반려동물 참고 사진 풀 (최대 10장, data URL[])
+    petPhotosUploadedCount: 0, // 뒤로 갔다 다시 진행할 때 중복 업로드 방지용
     ownerPhoto: null,
     bgPhoto: null,
     // 채팅 화면으로 넘어가기 전에 사진 생성이 끝나버린 경우, 채팅 진입 후
@@ -41,8 +44,10 @@
   // 이미지가 계속 깨져서 뜨는 문제가 반복 확인됨 — 우리 서버가 대신 가져와
   // 스트리밍하는 프록시를 거치도록 우회한다. <img>는 커스텀 헤더를 못 보내서
   // 토큰은 쿼리 파라미터로 붙인다.
-  function avatarProxyUrl(petId) {
-    return '/api/chat/pets/' + petId + '/avatar-proxy?token=' + encodeURIComponent(getToken() || '')
+  function avatarProxyUrl(petId, jobId) {
+    let url = '/api/chat/pets/' + petId + '/avatar-proxy?token=' + encodeURIComponent(getToken() || '')
+    if (jobId) url += '&jobId=' + encodeURIComponent(jobId)
+    return url
   }
 
   function fileToDataUrl(file) {
@@ -108,68 +113,150 @@
   wirePreview('owner-photo', 'owner-photo-preview', 'owner-photo-label')
   wirePreview('bg-photo', 'bg-photo-preview', 'bg-photo-label')
 
-  // 반려동물 사진은 미리보기와 동시에 종/품종을 사진으로 자동 분류한다(사용자
-  // 직접 입력 없음). 선택 즉시 백그라운드로 분류 요청을 보내고, "다음단계"를
-  // 누를 때 아직 안 끝났으면 그때 기다린다.
+  // 반려동물 사진은 한 번에 최대 10장까지 올릴 수 있다 — 이후 사진 합성/
+  // "오늘의 추억사진" 때마다 이 중 한 장을 서버가 랜덤으로 골라 쓴다. 종/품종은
+  // 첫 번째 사진으로만 자동 분류한다(사용자 직접 입력 없음). 사진을 고를 때마다
+  // 백그라운드로 분류 요청을 보내고, "다음단계"를 누를 때 아직 안 끝났으면
+  // 그때 기다린다.
   let speciesPromise = null
-  const petPhotoPreview = document.getElementById('pet-photo-preview')
+  const petPhotoGrid = document.getElementById('pet-photo-grid')
   const petPhotoLabel = document.getElementById('pet-photo-label')
+  const petPhotoCount = document.getElementById('pet-photo-count')
   const petSpeciesHint = document.getElementById('pet-species-hint')
-  document.getElementById('pet-photo').addEventListener('change', async () => {
-    const file = document.getElementById('pet-photo').files[0]
-    if (!file) {
-      petPhotoPreview.classList.add('hidden')
-      petPhotoLabel.classList.remove('hidden')
+
+  function renderPetPhotoGrid() {
+    petPhotoGrid.innerHTML = ''
+    state.petPhotos.forEach((dataUrl, idx) => {
+      const item = document.createElement('div')
+      item.className = 'photo-grid-item'
+      const img = document.createElement('img')
+      img.src = dataUrl
+      item.appendChild(img)
+      const remove = document.createElement('div')
+      remove.className = 'photo-grid-remove'
+      remove.textContent = '×'
+      remove.addEventListener('click', () => {
+        state.petPhotos.splice(idx, 1)
+        if (idx === 0) refreshSpeciesHint()
+        renderPetPhotoGrid()
+      })
+      item.appendChild(remove)
+      petPhotoGrid.appendChild(item)
+    })
+    petPhotoLabel.textContent =
+      state.petPhotos.length === 0 ? '반려동물 사진을 올려주세요 (최대 10장)' : '사진 추가하기'
+    petPhotoCount.textContent = state.petPhotos.length + ' / ' + MAX_PET_PHOTOS + '장'
+  }
+
+  function refreshSpeciesHint() {
+    if (state.petPhotos.length === 0) {
       petSpeciesHint.textContent = ''
       speciesPromise = null
       return
     }
-    petPhotoPreview.src = URL.createObjectURL(file)
-    petPhotoPreview.classList.remove('hidden')
-    petPhotoLabel.classList.add('hidden')
     petSpeciesHint.textContent = '종을 확인하고 있어요...'
-
-    state.petPhoto = await normalizeImageFile(file)
     speciesPromise = api('/api/chat/classify-species', {
       method: 'POST',
-      body: JSON.stringify({ image: state.petPhoto }),
+      body: JSON.stringify({ image: state.petPhotos[0] }),
     }).then(({ ok, data }) => {
       const species = ok ? data.species : ''
       petSpeciesHint.textContent = species ? `${species}로 확인했어요` : ''
       return species || ''
     })
-  })
-
-  function randomHex(len) {
-    const bytes = new Uint8Array(len)
-    crypto.getRandomValues(bytes)
-    return Array.from(bytes)
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')
   }
 
-  // ── 익명 세션: 로그인 화면 없이 바로 테스트 진행 ──
-  async function ensureSession() {
-    const token = getToken()
-    if (token) {
-      const { ok } = await api('/api/auth/me')
-      if (ok) return
+  document.getElementById('pet-photo').addEventListener('change', async () => {
+    const input = document.getElementById('pet-photo')
+    const files = Array.from(input.files || [])
+    input.value = '' // 같은 파일을 다시 골라도 change가 또 뜨도록 초기화
+    if (files.length === 0) return
+
+    const wasEmpty = state.petPhotos.length === 0
+    const room = MAX_PET_PHOTOS - state.petPhotos.length
+    if (room <= 0) {
+      alert(`사진은 최대 ${MAX_PET_PHOTOS}장까지만 올릴 수 있어요.`)
+      return
     }
-    const email = `test_${randomHex(6)}@neseggi.local`
-    const password = randomHex(8)
-    const { ok, data } = await api('/api/auth/signup', {
-      method: 'POST',
-      body: JSON.stringify({ name: '테스터', email, password }),
-    })
+    const toAdd = files.slice(0, room)
+    if (files.length > toAdd.length) {
+      alert(`최대 ${MAX_PET_PHOTOS}장까지만 담을 수 있어서 ${toAdd.length}장만 추가했어요.`)
+    }
+
+    const converted = await Promise.all(toAdd.map((f) => normalizeImageFile(f)))
+    state.petPhotos.push(...converted)
+    renderPetPhotoGrid()
+    if (wasEmpty) refreshSpeciesHint()
+  })
+
+  // ── 로그인 (이메일/카카오/구글) ──
+  // "오늘의 추억사진"이 사용자별로 하루하루 이어지는 기능이라, 매번 새로
+  // 만들어지는 익명 세션으로는 이 기능을 확인할 수 없다 — 실제 로그인으로
+  // 되돌림.
+  const loginError = document.getElementById('login-error')
+
+  async function checkExistingLogin() {
+    if (!getToken()) return false
+    const { ok } = await api('/api/auth/me')
+    if (!ok) setToken(null)
+    return ok
+  }
+
+  function afterLogin() {
+    if (state.petId) {
+      enterChat()
+    } else {
+      showStep('step-pet')
+    }
+  }
+
+  document.getElementById('login-submit').addEventListener('click', async () => {
+    loginError.textContent = ''
+    const email = document.getElementById('login-email').value.trim()
+    const password = document.getElementById('login-password').value
+    const { ok, data } = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) })
     if (!ok) {
-      alert('테스트 세션 생성 실패: ' + (data.error || ''))
+      loginError.textContent = data.error || '로그인 실패'
       return
     }
     setToken(data.token)
+    afterLogin()
+  })
+
+  document.getElementById('signup-submit').addEventListener('click', async () => {
+    loginError.textContent = ''
+    const name = document.getElementById('login-name').value.trim() || '테스터'
+    const email = document.getElementById('login-email').value.trim()
+    const password = document.getElementById('login-password').value
+    const { ok, data } = await api('/api/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify({ name, email, password }),
+    })
+    if (!ok) {
+      loginError.textContent = data.error || '회원가입 실패'
+      return
+    }
+    setToken(data.token)
+    afterLogin()
+  })
+
+  function loginWithOAuth(provider) {
+    loginError.textContent = ''
+    const popup = window.open('/api/auth/' + provider, 'oauth_' + provider, 'width=480,height=640')
+    function onMessage(e) {
+      const payload = e.data
+      if (!payload || payload.type !== 'oauth_success' || payload.provider !== provider) return
+      window.removeEventListener('message', onMessage)
+      setToken(payload.token)
+      afterLogin()
+    }
+    window.addEventListener('message', onMessage)
+    if (!popup) loginError.textContent = '팝업이 차단됐어요. 팝업 허용 후 다시 시도해주세요.'
   }
+  document.getElementById('login-kakao').addEventListener('click', () => loginWithOAuth('kakao'))
+  document.getElementById('login-google').addEventListener('click', () => loginWithOAuth('google'))
 
   // ── 단계 전환 ──
-  const steps = ['step-pet', 'step-title', 'step-owner-photo', 'step-bg-photo', 'step-generating', 'step-chat']
+  const steps = ['step-login', 'step-pet', 'step-title', 'step-owner-photo', 'step-bg-photo', 'step-generating', 'step-chat']
   const progressDots = Array.from(document.querySelectorAll('#progress-dots span'))
   function showStep(id) {
     steps.forEach((s) => document.getElementById(s).classList.toggle('hidden', s !== id))
@@ -184,9 +271,8 @@
       alert('이름을 입력해주세요.')
       return
     }
-    const photoFile = document.getElementById('pet-photo').files[0]
-    if (!photoFile || !state.petPhoto) {
-      alert('반려동물 사진을 선택해주세요.')
+    if (state.petPhotos.length === 0) {
+      alert('반려동물 사진을 최소 1장 선택해주세요.')
       return
     }
 
@@ -204,6 +290,22 @@
     state.petId = data.pet.id
     state.petName = name
     localStorage.setItem(PET_ID_KEY, state.petId)
+
+    // 뒤로 갔다가 다시 "다음단계"를 눌러도 이미 서버에 올라간 사진을 중복
+    // 업로드하지 않도록, 지난번 업로드 이후 새로 추가된 사진만 보낸다.
+    const newPhotos = state.petPhotos.slice(state.petPhotosUploadedCount)
+    if (newPhotos.length > 0) {
+      const uploadRes = await api('/api/chat/pets/' + state.petId + '/photos', {
+        method: 'POST',
+        body: JSON.stringify({ images: newPhotos }),
+      })
+      if (!uploadRes.ok) {
+        alert(uploadRes.data.error || '사진 업로드 실패')
+        return
+      }
+      state.petPhotosUploadedCount = state.petPhotos.length
+    }
+
     showStep('step-title')
   })
 
@@ -287,7 +389,7 @@
     state.pendingImageCaption = null
     state.pendingGenerationError = null
 
-    if (!state.petPhoto) {
+    if (!state.petId || state.petPhotosUploadedCount === 0) {
       // 정상 흐름이면 1단계에서 이미 필수로 막혀서 여기 도달할 수 없다 —
       // 혹시라도 상태가 꼬였을 때 조용히 건너뛰지 않고 명확히 되돌린다.
       alert('반려동물 사진이 없어서 합성을 진행할 수 없어요. 처음부터 다시 시작해주세요.')
@@ -295,7 +397,9 @@
       return
     }
 
-    const body = { petImage: state.petPhoto, concept: 'studio' }
+    // 반려동물 사진은 더 이상 직접 보내지 않는다 — 서버가 사진 풀(최대
+    // 10장)에서 랜덤으로 한 장을 골라 사용한다.
+    const body = { petId: state.petId, concept: 'studio' }
     if (state.ownerPhoto) body.ownerImage = state.ownerPhoto
     if (state.bgPhoto) body.backgroundImage = state.bgPhoto
 
@@ -471,8 +575,8 @@
   // 글자씩 줄바꿈되는 기형적인 크기로 보이고, 재시도할 때마다 크기가
   // 요동쳐 깜빡이는 것처럼 보인다(2026-09-10). 채팅창 자체의 실제 픽셀
   // 너비를 JS로 계산해서 고정 px로 지정하면 이 순환 참조가 생기지 않는다.
-  function appendPetImageMessage() {
-    const proxiedUrl = avatarProxyUrl(state.petId)
+  function appendPetImageMessage(jobId) {
+    const proxiedUrl = avatarProxyUrl(state.petId, jobId)
     const thumb = document.createElement('img')
     thumb.className = 'chat-thumb'
     thumb.alt = '생성된 사진'
@@ -528,6 +632,36 @@
       appendSystemNote('사진을 만드는 데 문제가 생겼어요' + (errorMessage ? ` (${errorMessage})` : ''))
       state.pendingGenerationError = null
     }
+
+    checkDailyMemory()
+  }
+
+  // "오늘의 추억사진" — 채팅에 들어올 때마다 확인한다. 서버가 하루에 한 번만
+  // 실제로 생성/알림을 하도록 멱등하게 처리하므로(generation_logs.source=
+  // 'daily_memory' + notified), 여기서는 그냥 매번 호출하면 된다.
+  async function checkDailyMemory() {
+    const { ok, data } = await api('/api/chat/pets/' + state.petId + '/daily-memory', { method: 'POST' })
+    if (!ok) return
+    if (data.status === 'processing' || data.status === 'pending') {
+      pollDailyMemoryInBackground(data.jobId)
+    } else if (data.status === 'done' && data.resultReady && data.caption) {
+      appendMessage('pet', data.caption)
+      appendPetImageMessage(data.jobId)
+    }
+    // 'no_photos' | 'failed' | 이미 알림 완료 → 조용히 아무것도 하지 않음
+  }
+
+  function pollDailyMemoryInBackground(jobId) {
+    const interval = setInterval(async () => {
+      const { ok, data } = await api('/api/generate/status/' + jobId)
+      if (!ok) return
+      if (data.status === 'done' || data.status === 'failed') {
+        clearInterval(interval)
+        // 상태와 무관하게 daily-memory를 다시 호출해서 캡션 생성+채팅 반영
+        // (또는 조용한 실패 처리)을 마무리한다.
+        checkDailyMemory()
+      }
+    }, 3000)
   }
 
   let sending = false
@@ -573,12 +707,11 @@
 
   // ── 시작 ──
   ;(async function init() {
-    await ensureSession()
-    if (state.petId) {
-      // 이미 진행했던 반려동물이 있으면 바로 채팅으로 (프로필/사진 단계 생략)
-      enterChat()
+    const loggedIn = await checkExistingLogin()
+    if (loggedIn) {
+      afterLogin()
     } else {
-      showStep('step-pet')
+      showStep('step-login')
     }
   })()
 })()

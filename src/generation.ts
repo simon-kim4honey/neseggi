@@ -287,9 +287,34 @@ async function syncJobStatus(db: D1Database, apiKey: string, job: any): Promise<
   }
 }
 
+// 반려동물 사진 풀(pet_photos, 최대 10장)에서 한 장을 랜덤으로 골라 그
+// 원본(data URL)을 KV에서 읽어온다. 온보딩 수동 합성과 "오늘의 추억사진"
+// 자동 생성(chat.ts) 둘 다 이 함수로 사진을 고른다 — 사용자가 매번 다른
+// 사진 조합을 보게 하려는 의도.
+async function pickRandomPetPhoto(
+  db: D1Database,
+  kv: KVNamespace,
+  petId: string,
+  userId: string
+): Promise<{ dataUrl: string; kvKey: string } | null> {
+  const { results } = await db
+    .prepare('SELECT kv_key FROM pet_photos WHERE pet_id = ? AND user_id = ?')
+    .bind(petId, userId)
+    .all()
+  const rows = (results as any[]) ?? []
+  if (rows.length === 0) return null
+  const chosen = rows[Math.floor(Math.random() * rows.length)]
+  const dataUrl = await kv.get(chosen.kv_key)
+  if (!dataUrl) return null
+  return { dataUrl, kvKey: chosen.kv_key }
+}
+
 // ────────────────────────────────────────────────────
 // POST /api/generate/start — 생성 시작 (크레딧 차감 + job 생성 + 비동기 큐잉)
-// body: { petImage: dataUrl, ownerImage?: dataUrl, concept?: 'studio'|'park'|'christmas' }
+// body: { petId: string, ownerImage?: dataUrl, backgroundImage?: dataUrl, concept?: 'studio'|'park'|'christmas' }
+// 반려동물 사진은 더 이상 클라이언트가 직접 보내지 않는다 — 온보딩 때
+// 업로드해둔 사진 풀(최대 10장, pet_photos) 중 한 장을 서버가 랜덤으로
+// 골라 사용한다(chat.ts의 POST /pets/:petId/photos로 미리 업로드돼 있어야 함).
 // ────────────────────────────────────────────────────
 generation.post('/start', async (c) => {
   try {
@@ -299,14 +324,20 @@ generation.post('/start', async (c) => {
     if (!user) return c.json({ error: '로그인이 필요합니다.', code: 'UNAUTHORIZED' }, 401)
 
     const body = await c.req.json().catch(() => null)
-    const petImage = body?.petImage
+    const petId = typeof body?.petId === 'string' ? body.petId : ''
     const ownerImage = body?.ownerImage
     const backgroundImage = body?.backgroundImage
     const conceptId = typeof body?.concept === 'string' && CONCEPTS[body.concept] ? body.concept : DEFAULT_CONCEPT
 
-    if (!isDataUrl(petImage)) {
-      return c.json({ error: '반려동물 사진이 필요합니다.', code: 'PET_IMAGE_REQUIRED' }, 400)
+    if (!petId) return c.json({ error: '반려동물 정보가 필요합니다.', code: 'PET_ID_REQUIRED' }, 400)
+    const pet = await db.prepare('SELECT id FROM pets WHERE id = ? AND user_id = ?').bind(petId, (user as any).id).first()
+    if (!pet) return c.json({ error: '반려동물을 찾을 수 없습니다.', code: 'PET_NOT_FOUND' }, 404)
+
+    const picked = await pickRandomPetPhoto(db, c.env.NESEGGI_KV, petId, (user as any).id)
+    if (!picked) {
+      return c.json({ error: '반려동물 사진이 필요합니다. 먼저 사진을 올려주세요.', code: 'PET_IMAGE_REQUIRED' }, 400)
     }
+    const petImage = picked.dataUrl
     const hasOwnerImage = isDataUrl(ownerImage)
     const hasBackgroundImage = isDataUrl(backgroundImage)
 
@@ -342,8 +373,10 @@ generation.post('/start', async (c) => {
         .run()
     }
 
-    // 원본 이미지는 KV에 저장 (D1 컬럼 값 크기 제한 회피) — D1엔 KV 키만 기록
-    const petImageKey = await storeInputImage(c.env.NESEGGI_KV, jobId, 'pet', petImage)
+    // 반려동물 사진은 이미 pet_photos 풀의 KV 키를 그대로 재사용(중복 저장 안 함).
+    // 보호자/배경 사진은 여전히 그때그때 업로드되는 1회성 입력이라 기존처럼 KV에
+    // 새로 저장한다(D1 컬럼 값 크기 제한 회피, D1엔 KV 키만 기록).
+    const petImageKey = picked.kvKey
     const ownerImageKey = hasOwnerImage
       ? await storeInputImage(c.env.NESEGGI_KV, jobId, 'owner', ownerImage)
       : null
@@ -353,10 +386,10 @@ generation.post('/start', async (c) => {
 
     await db
       .prepare(
-        `INSERT INTO generation_logs (id, user_id, owner_image_b64, pet_image_b64, background_image_b64, output_type, concept, status, credits_used)
-         VALUES (?, ?, ?, ?, ?, 'image', ?, 'pending', ?)`
+        `INSERT INTO generation_logs (id, user_id, pet_id, owner_image_b64, pet_image_b64, background_image_b64, output_type, concept, status, credits_used, source)
+         VALUES (?, ?, ?, ?, ?, ?, 'image', ?, 'pending', ?, 'manual')`
       )
-      .bind(jobId, (user as any).id, ownerImageKey, petImageKey, backgroundImageKey, conceptId, creditsCost)
+      .bind(jobId, (user as any).id, petId, ownerImageKey, petImageKey, backgroundImageKey, conceptId, creditsCost)
       .run()
 
     const prompt = buildPrompt(conceptId, hasOwnerImage, hasBackgroundImage)
@@ -411,4 +444,4 @@ generation.get('/status/:jobId', async (c) => {
   })
 })
 
-export { generation }
+export { generation, CONCEPTS, buildPrompt, startAtlasJob, newJobId, updateJob, pickRandomPetPhoto, ATLAS_API_BASE }

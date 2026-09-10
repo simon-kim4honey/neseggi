@@ -44,10 +44,14 @@ const GUARDS = [
     why: '이 문구가 사라지면 사용자가 올린 배경 사진(집 등)에 찍혀있던 다른 사람이나 동물이 결과물에 그대로 나타날 수 있다.',
   },
   {
-    name: '배경 사진이 인물/동물 크기·생김새에 영향 주지 않도록 제한',
-    must:
-      "the subject(s) keep the exact same relative size and appearance they would have in a normal close-up photo, regardless of the room's scale",
+    name: '배경 사진이 인물/동물 얼굴·생김새(정체성)에 영향 주지 않도록 제한',
+    must: "their face, fur pattern, and other identifying features must stay exactly as shown in their source photo, regardless of Image",
     why: '2026-09-10 실사진 테스트에서 이 제약이 없을 때 배경 사진(넓은 실내 등) 때문에 반려동물 크기가 과도하게 커지고 보호자 얼굴이 바뀌는 문제가 실제로 발생함. (반려동물 단독 배경합성 케이스도 동일 위험이 있어 subject(s) 표현으로 일반화)',
+  },
+  {
+    name: '배경(소파/가구 등)은 인물·동물 비율에 맞게 자연스럽게 렌더링',
+    must: 'render the background\'s furniture and room proportions at a scale and perspective that naturally fits around the subjects',
+    why: '2026-09-11 실사진 테스트에서, 인물 크기를 원본 그대로 고정하기만 하고 배경 비율은 안 맞춰서 소파/테이블 같은 가구가 인물과 어색하게 따로 노는(비율이 안 맞는) 합성 결과가 나옴 — 배경이 인물/동물 크기에 맞춰 조정되어야 한다는 방향을 명시.',
   },
 ]
 

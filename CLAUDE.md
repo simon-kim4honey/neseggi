@@ -3,107 +3,193 @@
 Cloudflare Workers/Pages + Hono + D1 + KV. EZlook(lookbook-ai)와 동일한
 아키텍처 패턴을 따르는 별도 서비스.
 
-## ⚠️ 실제 제품 정체성 — "사진 합성 서비스"가 아니다
+## 제품 정체성 — "사진 합성 서비스"가 아니다
 
 이 백엔드는 **웹이 아니라 앱 서비스**의 API 서버다. 핵심 기능은 사진 합성이
 아니라 **채팅**이다:
 
 - 사용자(반려동물 보호자)와, 무지개다리를 건넌(세상을 떠난) 반려동물과의
   대화를 나누는 채팅 앱이 본체다.
-- 반려동물 쪽 메시지는 사람이 입력하는 게 아니라 **AI가 자동으로 질문/답변을
-  생성**해서 채팅창에 보낸다.
+- 반려동물 쪽 메시지는 사람이 입력하는 게 아니라 **Claude API(`claude-opus-5`)가
+  자동으로 질문/답변을 생성**해서 채팅창에 보낸다 (`src/chat.ts`).
+- 세계관: 세상을 떠난 반려동물은 무지개나라에서 친구도 많고 맛있는 것도 많고
+  놀거리도 많아서 행복하게 잘 지내고 있다. 보호자를 그리워하며 기다리고는
+  있지만 외롭거나 심심하지는 않다 — "기다렸잖아", "심심했어" 같은 쓸쓸한
+  표현은 페르소나 프롬프트에서 명시적으로 금지되어 있다.
 - 보호자 사진 + 반려동물 사진 + 배경 사진 합성(`src/generation.ts`,
-  AtlasCloud `google/nano-banana-2/edit`)은 이 채팅 서비스의 **부가 기능**
-  (반려동물 프로필/키프사진 생성 등으로 추정 — 채팅과 정확히 어떻게 연결되는지
-  는 아직 미확정, 다음 세션에서 확인 필요)이지 메인 기능이 아니다.
+  AtlasCloud `google/nano-banana-2/edit`)은 채팅의 **부가 기능** — 반려동물
+  프로필 대표 이미지를 만들어주는 용도로 쓰인다(온보딩 위저드에서 반려동물
+  프로필 → 보호자 프로필 → 합성 → 채팅 순으로 이어짐).
 - 가입 플로우: 사용자가 (본인/반려동물/배경) 사진을 입력하는 시점에 로그인이
   안 돼 있으면 그때 신규 가입 화면이 뜬다(선가입 후사용이 아니라, 사진 입력
-  →필요시 가입 →계속). 이미 로그인돼 있으면 그대로 진행.
-- 채팅(대화 메시지 저장/조회, AI 자동 응답 생성)을 위한 스키마/API가 아직
-  없다 — `generation_logs`/`credit_logs`/`users`만으로는 부족하다. 채팅
-  메시지 테이블, 반려동물 "페르소나"(말투/성격을 어떻게 프롬프트에 반영할지),
-  대화 응답에 쓸 텍스트 생성 API(AtlasCloud는 이미지 전용이라 별도 필요 —
-  어떤 프로바이더/키를 쓸지 미정)를 다음 세션에서 확정할 것.
+  →필요시 가입 →계속). `/test` QA 페이지는 이 흐름을 흉내내되 로그인 화면
+  없이 익명 세션을 자동 생성한다(실제 앱은 아직 이 자동 가입 UX를 어떻게
+  구현할지 미정 — 다음 세션에서 확인).
 
 ## 아키텍처
 
 lookbook-ai와 달리 `src/index.tsx`는 얇게 유지하고, 도메인별로 파일을 분리해
-`app.route()`로 마운트한다: `auth.ts`(인증/세션), `payments.ts`(토스/Stripe
-결제), `generation.ts`(AI 생성 job — 사진 합성), `admin.ts`(관리자 API).
-채팅 기능은 아직 파일이 없음 — 만들 때 `chat.ts`로 분리해 같은 패턴을 따를 것.
+`app.route()`로 마운트한다: `auth.ts`(인증/세션 — 이메일+카카오+구글 구현
+완료), `payments.ts`(토스/Stripe 결제 — 501 스텁, 미구현), `generation.ts`
+(AI 사진 합성), `admin.ts`(관리자 API — 스텁), `chat.ts`(반려동물 채팅,
+`@anthropic-ai/sdk` 사용).
+
+`/test` (`src/index.tsx` + `public/static/test.js`)는 curl 없이 브라우저에서
+전체 흐름(반려동물 프로필 → 보호자 프로필/호칭/사진/배경사진 → 합성 → 채팅)을
+확인할 수 있는 QA 전용 페이지. 실제 앱 UI가 아니다.
+
+## ⚠️ QA 크레딧 우회 — 정식 오픈 전 반드시 제거/잠글 것
+
+`/test` 페이지가 보내는 `X-Neseggi-QA: 1` 헤더가 있으면 `generation.ts`가
+크레딧 차감을 건너뛴다(`generation_logs.credits_used = 0`). 결제 시스템이
+붙기 전까지만 쓰는 임시 장치이며, **지금 상태로 정식 배포하면 누구든 이
+헤더로 무료 생성이 가능하다.** 결제/크레딧 시스템을 실제로 붙일 때
+`generation.ts`의 `isQaTest` 분기를 제거하거나 관리자 인증 등으로 잠글 것.
 
 ## ⚠️ AI 생성 프롬프트는 조용히 망가질 수 있다
 
-`src/generation.ts`에 실제 생성 프롬프트를 작성하게 되면, 그 문자열이
-결과물 품질을 직접 좌우한다. lookbook-ai에서 실제로 겪은 사고(프롬프트
-리팩터링 중 핵심 지시문이 반대 의미로 바뀌었는데 빌드/배포/로그 어디에도
-안 남고 사용자 리포트로만 발견됨)와 동일한 위험이 있다.
+`src/generation.ts`(사진 합성)와 `src/chat.ts`(반려동물 페르소나)의 프롬프트
+문자열이 결과물 품질/서비스의 정서적 핵심을 직접 좌우한다. lookbook-ai에서
+실제로 겪은 사고(프롬프트 리팩터링 중 핵심 지시문이 반대 의미로 바뀌었는데
+빌드/배포/로그 어디에도 안 남고 사용자 리포트로만 발견됨)와 동일한 위험이
+있다.
 
-- `npm run build`는 `scripts/verify-critical-prompts.mjs`를 먼저 실행한다.
-  프롬프트에 새로운 "절대 지켜야 하는" 문구를 추가하면 반드시 이 스크립트의
-  `GUARDS` 배열에도 등록할 것.
-- 이 가드는 문구 "존재 여부"만 확인하지 의미 전체를 검증하지 않는다. 문구가
-  있다고 안심하지 말고, 프롬프트를 고칠 때는 반드시 직접 읽고 의미를 확인할 것.
+- `npm run build`는 `scripts/verify-critical-prompts.mjs`를 먼저 실행해서
+  `src/generation.ts`의 GUARDS 문구가 살아있는지 확인한다(현재 4개 등록됨:
+  반려동물/보호자 생김새 보존, 배경 사진 레퍼런스 제한 2건). **이 가드는
+  `generation.ts`만 확인하고 `chat.ts`는 검사하지 않는다** — 채팅 페르소나
+  프롬프트는 자동 가드가 없으니 고칠 때 더 조심할 것.
+- 새로운 "절대 지켜야 하는" 문구를 `generation.ts`에 추가하면 반드시
+  `GUARDS` 배열에도 등록할 것. 가드는 문구 "존재 여부"만 확인하지 의미
+  전체를 검증하지 않는다 — 문구가 있다고 안심하지 말고 직접 읽고 의미를
+  확인할 것.
 - 다른 것을 리팩터링하다가 프롬프트 문자열이 눈에 띄어도, 요청받지 않았다면
   손대지 말 것.
 - 프롬프트를 의도적으로 바꿀 때는 바꾸기 전/후 문구를 나란히 보여주고 무엇이
-  왜 바뀌는지 설명할 것.
+  왜 바뀌는지 설명할 것 (`chat.ts`도 동일 원칙 적용 — 자동 가드는 없지만
+  원칙은 같음).
+- `generation.ts`의 `buildPrompt`는 반려동물 사진(필수)/보호자 사진(선택)/
+  배경 사진(선택) 조합 4가지를 모두 지원한다. 배경 사진이 있을 때 생김새
+  보존 규칙을 배경 지시문보다 뒤(출력 직전)에 배치하는 게 중요 — 순서를
+  앞으로 옮기면 2026-09-10에 재현됐던 "배경 때문에 인물 얼굴이 바뀌고
+  동물 크기가 커지는" 문제가 다시 생길 수 있다.
 
-## 재사용한 스키마 (lookbook-ai 기반, 거의 그대로)
+## 재사용한 스키마 (lookbook-ai 기반, 거의 그대로) + 신규 스키마
 
-- `users`, `user_sessions` — 이메일/카카오/구글 인증 (`migrations/0001_users.sql`)
-- `credit_logs` — 크레딧 증감 원장 (`migrations/0002_credit_logs.sql`)
-- `payment_logs` — 토스페이먼츠/Stripe 결제 내역 (`migrations/0003_payment_logs.sql`)
-- `generation_logs` — 내새끼 고유 스키마(보호자 사진 + 반려동물 사진 2-슬롯),
-  lookbook-ai의 3-슬롯 구조와 다름 (`migrations/0004_generation_logs.sql`)
+- `users`, `user_sessions` — 이메일/카카오/구글 인증 (`migrations/0001`)
+- `credit_logs` — 크레딧 증감 원장 (`migrations/0002`)
+- `payment_logs` — 토스페이먼츠/Stripe 결제 내역 (`migrations/0003`, 아직
+  실제 결제 라우트 미구현이라 미사용)
+- `generation_logs` — 사진 합성 job (`migrations/0004~0006`). 원본 이미지는
+  D1이 아니라 KV(`gen_input:{jobId}:{pet|owner|background}`, 14일 TTL)에
+  저장하고 D1엔 KV 키만 기록 — 큰 base64 값을 D1 컬럼에 직접 넣으면 값 크기
+  제한에 걸려 500 에러가 난다(2026-09-10 실사진 테스트에서 확인). `atlas_job_id`
+  컬럼(`0006`)에 AtlasCloud job id를 저장해서, `/status` 폴링마다 그 요청 안에서
+  직접 조회한다(아래 "waitUntil은 이 환경에서 신뢰할 수 없다" 참고).
+- `pets` (`migrations/0007`, `0008`) — 반려동물 프로필(이름/종/성격/대표사진/
+  `owner_title`=보호자를 부르는 호칭)
+- `chat_messages` (`migrations/0007`) — 대화 이력(`role`: `user`|`pet`)
 
-## 결제 (토스페이먼츠)
+## ⚠️ `c.executionCtx.waitUntil`은 이 Cloudflare Pages 환경에서 신뢰할 수 없다
+
+2026-09-10에 실제로 재현/디버깅한 내용: `generation.ts`에서 AtlasCloud
+호출을 `waitUntil`로 백그라운드에 던졌더니, 함수는 시작되는데(디버그 마커
+기록까지 성공) `fetch()` 완료 전에 실행이 조용히 끊기고 job이 영원히
+`pending`/`processing`에 멈추는 문제가 반복 재현됐다. `waitUntil` 대신
+`/start` 핸들러 안에서 직접 `await`하도록 바꿔서 해결 — **AtlasCloud
+"생성 시작" 요청은 이제 요청 처리 안에서 동기적으로 기다린다** (job 접수
+확인 응답만 기다리는 거라 보통 1초 안팎, `AbortController`로 25초
+타임아웃도 걸어둠). 완료 여부 폴링(`/status`)은 원래도 클라이언트가
+호출할 때마다 그 요청 안에서 짧게 조회하는 방식이라 `waitUntil`을 쓴 적이
+없다 — 문제 없음.
+
+**교훈: 이 프로젝트에서 `waitUntil`로 오래 걸리는 작업(fetch 포함)을
+던지는 패턴은 쓰지 말 것.** 짧은 요청을 클라이언트가 반복 호출하게
+만드는 폴링 패턴이 안전하다.
+
+## ⚠️ AtlasCloud 서비스 장애 이력 (2026-09-10)
+
+같은 날, 위 waitUntil 문제를 고친 뒤에도 `POST /api/v1/model/generateImage`
+호출이 계속 응답 없이 멈추는 문제가 발생. 디버깅으로 **AtlasCloud 쪽
+문제임을 확정**함 (우리 코드 문제 아님):
+- Cloudflare Worker에서 호출 → 무응답(타임아웃)
+- 사용자 맥북에서 우리 서버 안 거치고 AtlasCloud를 직접 호출 → 동일하게
+  120초까지 기다려도 0바이트 무응답
+- `GET https://api.atlascloud.ai/`(루트)는 빠르게 404 정상 응답 — 도메인/
+  Cloudflare 프론트는 살아있음, `generateImage` 엔드포인트 백엔드만 무응답
+- AtlasCloud 담당자에게 문의함 — 다음 세션에서 해결됐는지 먼저 확인할 것.
+  같은 증상 재현되면 이 섹션의 진단 절차(맥북에서 직접 curl, `--max-time`
+  길게)부터 다시 밟을 필요 없이 바로 AtlasCloud 쪽에 확인.
+- 이 장애가 있기 전, 2026-09-10 낮에는 실제로 여러 번 정상 동작 확인됨
+  (반려동물+보호자 합성, 배경 사진 포함 합성 모두 실사진으로 검증 완료) —
+  코드/프롬프트 자체는 검증됐다.
+
+## 결제 (토스페이먼츠, 아직 미구현)
 
 - 반드시 "API 개별연동 키" 사용 — "주문서형·결제창형 연동 키"는 SDK 방식에서
   토스가 거부한다.
 - 웹훅(`POST /payment/toss/webhook`)엔 서명 헤더가 없다. 웹훅 수신 시
   `GET /v1/payments/{paymentKey}`로 직접 재조회한 뒤에만 크레딧을 회수할 것.
+- `src/payments.ts`는 현재 501 스텁 상태.
 
 ## 배포 워크플로
 
-- `handoff` → `develop`(스테이징, Cloudflare Pages 자동 배포) → 확인 후
-  `promote-*-to-main` 브랜치 + PR + merge → `main`(운영).
+- `handoff` → `develop`(스테이징, Cloudflare Pages 자동 배포, GitHub 연동
+  완료) → 확인 후 `promote-*-to-main` 브랜치 + PR + merge → `main`(운영,
+  아직 GitHub 연동 안 함 — develop만 연결됨).
 - `dist/_worker.js`, `dist/static/*`는 빌드 산출물이지만 저장소에 커밋한다
   (`npm run build` 후 항상 함께 커밋).
-- `wrangler.jsonc`는 브랜치별로 다르다 — `develop`/handoff는 스테이징 D1/KV를,
-  `main`은 운영 D1/KV를 가리킨다. **`main`으로 승격할 때 `wrangler.jsonc`는
-  절대 건드리지 말 것** (`git diff origin/main -- wrangler.jsonc`가 비어있는지
-  항상 확인).
-- 새 D1 마이그레이션은 스테이징/운영 양쪽에 수동으로 실행해야 한다
+- `wrangler.jsonc`는 브랜치별로 다르다 — `develop`는 스테이징 D1/KV를 가리키게
+  이미 채워져 있음(`neseggi-staging` D1, `neseggi-staging-kv` KV). `main`용
+  값(`neseggi-production` D1, `neseggi-production-kv` KV)은 이미 Cloudflare에
+  리소스는 만들어져 있으나 `main`의 `wrangler.jsonc`에는 아직 반영 안 함 —
+  **`main`으로 승격할 때만** 채울 것 (`git diff origin/main -- wrangler.jsonc`가
+  비어있는지 항상 확인, 승격 PR에서만 예외적으로 채움).
+- 새 D1 마이그레이션은 `neseggi-staging`/`neseggi-staging-preview`/
+  `neseggi-production` 3개 DB 모두에 수동으로 실행해야 한다
   (`npx wrangler d1 execute <db-name> --remote --file=migrations/...sql`).
-- Cloudflare Pages의 `wrangler pages secret put`은 버전에 따라 `--env` 플래그가
-  없어, 플래그 없이 실행하면 Preview가 아니라 Production에 쓰인다. 결제 관련
-  시크릿은 반드시 Cloudflare 대시보드 → 프로젝트 → Settings → Environment
-  variables에서 Preview/Production을 구분해 넣을 것.
+  지금까지 만든 마이그레이션은 3곳 모두 적용 완료(`0001`~`0008`).
+- Cloudflare Pages 시크릿(Preview/Production 환경변수)은 대시보드 대신
+  Cloudflare API(`PATCH /accounts/{id}/pages/projects/{name}`, `deployment_configs.preview.env_vars`)로도
+  등록 가능 — 이번 세션에서 이 방식으로 Preview 환경에 다 등록함. **가끔
+  PATCH 직후 무관한 기존 키가 사라지는 현상이 관찰됨**(원인 불명, Cloudflare
+  API 쪽 이슈로 추정) — 시크릿 등록/변경 후에는 항상 GET으로 전체 키 목록을
+  다시 확인할 것.
+- Cloudflare Pages는 env_vars를 이미 배포된 버전에 즉시 반영하지 않는 것으로
+  보임 — 시크릿을 새로 등록/변경한 뒤에도 값이 안 읽히면(`Anthropic` SDK의
+  "Could not resolve authentication method" 같은 에러) `POST
+  /accounts/{id}/pages/projects/{name}/deployments/{deployment_id}/retry`로
+  최신 배포를 재배포해서 픽업시킬 것.
 
-## 필요한 시크릿 (Cloudflare Pages 환경변수)
+## 필요한 시크릿 (Cloudflare Pages 환경변수) — Preview 환경 등록 완료
 
-lookbook-ai에서 실제 쓰이는 시크릿 이름 기준 — neseggi도 동일한 이름을 재사용:
+- `ATLAS_API_KEY` — AtlasCloud 이미지 생성 (`https://api.atlascloud.ai`) ✅ 등록됨
+- `ANTHROPIC_API_KEY` — 반려동물 채팅(Claude API) ✅ 등록됨
+- `KAKAO_CLIENT_ID` — EZlook(lookbook-ai)과 **동일 앱 재사용**(REST API 키).
+  EZlook 쪽 "카카오 로그인 클라이언트 시크릿" 기능이 꺼져있어서
+  `KAKAO_CLIENT_SECRET`은 필요 없음(보내도 카카오가 검증 안 함). ✅ 등록됨
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — EZlook과 동일 Google Cloud
+  OAuth 클라이언트 재사용, neseggi 콜백 URL을 승인된 리디렉션 URI에 추가함.
+  ✅ 등록됨
+- `TOSS_CLIENT_KEY`, `TOSS_SECRET_KEY` — 테스트/샌드박스 키만 등록됨(실제
+  가맹점 키 아님, 실서비스 전 교체 필요). `TOSS_API_BASE` =
+  `https://api.tosspayments.com` ✅ 등록됨
+- `ADMIN_PASSWORD` — 랜덤 생성해서 등록함(값은 세션 로그 참고, 별도
+  비밀번호 관리자로 옮겨둘 것) ✅ 등록됨
+- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` — 해외 결제(선택), 미등록
+- `GA4_MEASUREMENT_ID` — `wrangler.jsonc`의 `vars`, 아직 placeholder
 
-- `ATLAS_API_KEY` — AtlasCloud 이미지 생성 (`https://api.atlascloud.ai`)
-- `TOSS_CLIENT_KEY`, `TOSS_SECRET_KEY`, `TOSS_API_BASE` — 토스페이먼츠
-- `ADMIN_PASSWORD` — `/api/admin/*` 인증
-- `KAKAO_CLIENT_ID`, `KAKAO_CLIENT_SECRET`, `KAKAO_JS_KEY` — 카카오 로그인
-- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — 구글 로그인
-- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` — 해외 결제(선택)
+**Production 환경 시크릿은 아직 안 넣음** — `main` 승격 전 Cloudflare
+대시보드에서 Preview와 구분해서 별도로 채울 것 (카카오/구글은 실서비스
+도메인의 콜백 URL도 각 콘솔에 추가로 등록해야 함).
 
-Preview(`develop`)/Production(`main`) 시크릿은 반드시 Cloudflare 대시보드에서
-구분해서 넣을 것(`wrangler pages secret put`은 `--env` 플래그가 버전에 따라
-없어서 실수로 Production에 쓰일 수 있음).
-
-## AtlasCloud 실제 연동 계약 (lookbook-ai 실제 코드 기준)
-
-`src/generation.ts` 구현 시 참고할 정확한 API 형태:
+## AtlasCloud 실제 연동 계약 (검증 완료)
 
 ```
 POST https://api.atlascloud.ai/api/v1/model/generateImage
 Headers: Authorization: Bearer {ATLAS_API_KEY}, Content-Type: application/json
-Body: { model, prompt, aspect_ratio, resolution, thinking_level, output_format: 'jpeg', images: string[] }
+Body: { model: 'google/nano-banana-2/edit', prompt, aspect_ratio, resolution,
+        thinking_level, output_format: 'jpeg', images: string[] (data URL) }
 → { code: 200, data: { id: jobId } }
 
 GET https://api.atlascloud.ai/api/v1/model/prediction/{jobId}
@@ -111,21 +197,22 @@ Headers: Authorization: Bearer {ATLAS_API_KEY}
 → { data: { status: 'completed'|'succeeded'|'failed'|..., outputs/output/images: string[] | string } }
 ```
 
-lookbook-ai는 `google/nano-banana-2/edit` 모델을 사용한다. **neseggi가 같은
-모델로 반려동물 합성이 가능한지는 검증되지 않았다** — 실제 계정으로 테스트 먼저
-필요 (아래 "아직 안 한 것" 참고). lookbook-ai는 이 호출을 요청 안에서 동기
-대기(최대 90초)하는 방식으로 쓰고 있지만, neseggi는 문서에서 의도한 대로
-`ctx.executionCtx.waitUntil` + 클라이언트 폴링(202 응답) 방식으로 구현 권장.
+2026-09-10에 실사진으로 검증 완료 — 반려동물만, 반려동물+보호자,
+반려동물+보호자+배경 조합 모두 생김새 보존 확인됨. `images` 배열 순서는
+항상 `[반려동물, (보호자), (배경)]`. 배경 사진이 있으면 `thinking_level:
+'high'`, 없으면 `'default'`.
 
 ## 아직 안 한 것 (다음 세션)
 
-- Cloudflare Workers/Pages 프로젝트 생성 + D1/KV(스테이징/운영 분리) 실제 생성
-  → `wrangler.jsonc`의 `REPLACE_WITH_*` 값 채우기
-- 토스페이먼츠 내새끼용 가맹점 가입 + API 개별연동 키 발급
-- AI 생성 API(AtlasCloud 등) 계약/키 확인, 반려동물 합성 가능 여부 검증 →
-  `src/generation.ts` 실제 구현 + `scripts/verify-critical-prompts.mjs`의
-  `GUARDS` 채우기
-- 결제 라우트 실제 구현 (`src/payments.ts`는 현재 501 스텁; `src/auth.ts`는
-  이메일 회원가입/로그인/세션/`/me`까지 구현 완료, OAuth만 스텁)
+- **AtlasCloud 장애 복구 확인** (위 섹션 참고) — 담당자 문의 답변 왔는지,
+  다시 정상 호출되는지 먼저 확인
+- 토스페이먼츠 내새끼용 실제 가맹점 가입 + API 개별연동 키 발급 (지금은
+  샌드박스 키)
+- 결제 라우트 실제 구현 (`src/payments.ts`는 현재 501 스텁)
+- `main` 브랜치 GitHub 연동 + `wrangler.jsonc`에 production D1/KV 반영 +
+  Production 시크릿 등록
+- QA 크레딧 우회(`X-Neseggi-QA`) 제거/잠금 — 위 경고 섹션 참고
 - `/terms`, `/privacy`, `/refund-policy` — 내새끼 사업자 정보로 실제 내용 작성
   (전자상거래법 제17조 기준 청약철회 조항 포함)
+- 실제 앱(모바일) 쪽 구현 — 이 저장소는 API 백엔드만 담당, 앱 클라이언트는
+  별도 저장소/프로젝트로 추정되나 아직 확인 안 됨

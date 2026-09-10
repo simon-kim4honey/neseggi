@@ -56,6 +56,7 @@ app.get('/test', (c) => {
             반려동물 사진
             <input id="pet-photo" type="file" accept="image/*" class="block w-full mt-1" />
           </label>
+          <img id="pet-photo-preview" class="hidden w-24 h-24 object-cover rounded-lg border" />
           <input id="pet-name" type="text" placeholder="이름 (예: 콩이)" class="w-full border rounded px-3 py-2" />
           <input id="pet-species" type="text" placeholder="종 (예: 강아지)" class="w-full border rounded px-3 py-2" />
           <input id="pet-personality" type="text" placeholder="성격/말투" class="w-full border rounded px-3 py-2" />
@@ -80,6 +81,7 @@ app.get('/test', (c) => {
           <h2 class="text-lg font-bold">보호자 사진을 넣어주세요</h2>
           <p class="text-sm text-gray-500">우리 아이와 함께 있는 사진이 생겨요</p>
           <input id="owner-photo" type="file" accept="image/*" class="block w-full" />
+          <img id="owner-photo-preview" class="hidden w-24 h-24 object-cover rounded-lg border" />
           <div class="flex justify-between pt-2">
             <button id="step-owner-photo-back" class="text-gray-500">이전단계</button>
             <div class="flex gap-2">
@@ -94,6 +96,7 @@ app.get('/test', (c) => {
           <h2 class="text-lg font-bold">우리집 또는 자주 가는 장소를 올려주세요</h2>
           <p class="text-sm text-gray-500">우리 아이가 그곳에 있는 사진이 생겨요</p>
           <input id="bg-photo" type="file" accept="image/*" class="block w-full" />
+          <img id="bg-photo-preview" class="hidden w-24 h-24 object-cover rounded-lg border" />
           <div class="flex justify-between pt-2">
             <button id="step-bg-photo-back" class="text-gray-500">이전단계</button>
             <div class="flex gap-2">

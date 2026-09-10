@@ -39,6 +39,25 @@
     })
   }
 
+  // 파일 선택 즉시 썸네일 미리보기 — 업로드(=파일 선택)가 제대로 됐는지 눈으로 확인용
+  function wirePreview(inputId, previewId) {
+    const input = document.getElementById(inputId)
+    const preview = document.getElementById(previewId)
+    input.addEventListener('change', () => {
+      const file = input.files[0]
+      if (!file) {
+        preview.classList.add('hidden')
+        preview.src = ''
+        return
+      }
+      preview.src = URL.createObjectURL(file)
+      preview.classList.remove('hidden')
+    })
+  }
+  wirePreview('pet-photo', 'pet-photo-preview')
+  wirePreview('owner-photo', 'owner-photo-preview')
+  wirePreview('bg-photo', 'bg-photo-preview')
+
   function randomHex(len) {
     const bytes = new Uint8Array(len)
     crypto.getRandomValues(bytes)

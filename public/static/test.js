@@ -177,7 +177,11 @@
     if (state.ownerPhoto) body.ownerImage = state.ownerPhoto
     if (state.bgPhoto) body.backgroundImage = state.bgPhoto
 
-    const { ok, data } = await api('/api/generate/start', { method: 'POST', body: JSON.stringify(body) })
+    const { ok, data } = await api('/api/generate/start', {
+      method: 'POST',
+      headers: { 'X-Neseggi-QA': '1' }, // QA 테스트 페이지 전용 — 크레딧 차감 우회
+      body: JSON.stringify(body),
+    })
     if (!ok) {
       genStatusText.textContent = '오류: ' + (data.error || '생성 시작 실패')
       return

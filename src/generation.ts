@@ -147,6 +147,7 @@ async function updateJob(
 }
 
 async function refundCredits(db: D1Database, userId: string, jobId: string, amount: number) {
+  if (amount <= 0) return // QA 테스트 등 크레딧을 차감하지 않은 job은 환불도 없음
   const user: any = await db.prepare('SELECT credits FROM users WHERE id = ?').bind(userId).first()
   if (!user) return
   const balance = user.credits + amount
@@ -184,7 +185,8 @@ async function startAtlasJob(
   userId: string,
   prompt: string,
   images: string[],
-  thinkingLevel: string
+  thinkingLevel: string,
+  creditsCost: number
 ) {
   try {
     // 즉시 마커 기록 — waitUntil로 넘긴 함수가 실제로 실행되기 시작했는지
@@ -209,14 +211,14 @@ async function startAtlasJob(
     if (startData?.code !== 200 || !atlasJobId) {
       console.error('generation start failed:', jobId, startData)
       await updateJob(db, jobId, { status: 'failed', error_message: 'AI 생성 요청 실패' })
-      await refundCredits(db, userId, jobId, GENERATION_CREDIT_COST)
+      await refundCredits(db, userId, jobId, creditsCost)
       return
     }
     await updateJob(db, jobId, { status: 'processing', atlas_job_id: atlasJobId })
   } catch (err: any) {
     console.error('generation start error:', jobId, err)
     await updateJob(db, jobId, { status: 'failed', error_message: err?.message || '서버 오류' })
-    await refundCredits(db, userId, jobId, GENERATION_CREDIT_COST)
+    await refundCredits(db, userId, jobId, creditsCost)
   }
 }
 
@@ -229,7 +231,7 @@ async function syncJobStatus(db: D1Database, apiKey: string, job: any): Promise<
     const ageMs = Date.now() - new Date(job.created_at + 'Z').getTime()
     if (ageMs > JOB_STALE_MS) {
       await updateJob(db, job.id, { status: 'failed', error_message: '생성 시작에 실패했습니다.' })
-      await refundCredits(db, job.user_id, job.id, GENERATION_CREDIT_COST)
+      await refundCredits(db, job.user_id, job.id, job.credits_used)
       return { ...job, status: 'failed', error_message: '생성 시작에 실패했습니다.' }
     }
     return job
@@ -249,14 +251,14 @@ async function syncJobStatus(db: D1Database, apiKey: string, job: any): Promise<
       }
       console.error('generation completed but no output url:', job.id, pollRes)
       await updateJob(db, job.id, { status: 'failed', error_message: '생성 결과를 받지 못했습니다.' })
-      await refundCredits(db, job.user_id, job.id, GENERATION_CREDIT_COST)
+      await refundCredits(db, job.user_id, job.id, job.credits_used)
       return { ...job, status: 'failed', error_message: '생성 결과를 받지 못했습니다.' }
     }
 
     if (TERMINAL_FAIL_STATUSES.has(status)) {
       console.error('generation failed status:', job.id, status)
       await updateJob(db, job.id, { status: 'failed', error_message: `AI 생성 실패 (${status})` })
-      await refundCredits(db, job.user_id, job.id, GENERATION_CREDIT_COST)
+      await refundCredits(db, job.user_id, job.id, job.credits_used)
       return { ...job, status: 'failed', error_message: `AI 생성 실패 (${status})` }
     }
 
@@ -291,7 +293,13 @@ generation.post('/start', async (c) => {
     const hasOwnerImage = isDataUrl(ownerImage)
     const hasBackgroundImage = isDataUrl(backgroundImage)
 
-    if ((user as any).credits < GENERATION_CREDIT_COST) {
+    // ⚠️ 출시 전 QA 전용 우회 — /test 페이지만 이 헤더를 보낸다. 실제 결제/크레딧
+    // 시스템이 붙기 전까지만 쓰는 임시 장치이므로, 정식 오픈 전에 반드시 제거하거나
+    // (관리자 인증 등으로) 잠글 것. 그대로 두면 아무나 이 헤더로 무료 생성 가능.
+    const isQaTest = c.req.header('X-Neseggi-QA') === '1'
+    const creditsCost = isQaTest ? 0 : GENERATION_CREDIT_COST
+
+    if ((user as any).credits < creditsCost) {
       return c.json({ error: '크레딧이 부족합니다.', code: 'INSUFFICIENT_CREDITS' }, 402)
     }
 
@@ -300,20 +308,22 @@ generation.post('/start', async (c) => {
     // 차감은 잔액 조건을 다시 걸어 동시 요청으로 인한 이중 차감을 방지
     const deduct = await db
       .prepare('UPDATE users SET credits = credits - ? WHERE id = ? AND credits >= ?')
-      .bind(GENERATION_CREDIT_COST, (user as any).id, GENERATION_CREDIT_COST)
+      .bind(creditsCost, (user as any).id, creditsCost)
       .run()
     if (!deduct.meta.changes) {
       return c.json({ error: '크레딧이 부족합니다.', code: 'INSUFFICIENT_CREDITS' }, 402)
     }
 
-    const balanceRow: any = await db.prepare('SELECT credits FROM users WHERE id = ?').bind((user as any).id).first()
-    await db
-      .prepare(
-        `INSERT INTO credit_logs (user_id, type, amount, balance, reason, ref_id)
-         VALUES (?, 'deduct', ?, ?, 'pet_photo_generation', ?)`
-      )
-      .bind((user as any).id, -GENERATION_CREDIT_COST, balanceRow.credits, jobId)
-      .run()
+    if (creditsCost > 0) {
+      const balanceRow: any = await db.prepare('SELECT credits FROM users WHERE id = ?').bind((user as any).id).first()
+      await db
+        .prepare(
+          `INSERT INTO credit_logs (user_id, type, amount, balance, reason, ref_id)
+           VALUES (?, 'deduct', ?, ?, 'pet_photo_generation', ?)`
+        )
+        .bind((user as any).id, -creditsCost, balanceRow.credits, jobId)
+        .run()
+    }
 
     // 원본 이미지는 KV에 저장 (D1 컬럼 값 크기 제한 회피) — D1엔 KV 키만 기록
     const petImageKey = await storeInputImage(c.env.NESEGGI_KV, jobId, 'pet', petImage)
@@ -329,7 +339,7 @@ generation.post('/start', async (c) => {
         `INSERT INTO generation_logs (id, user_id, owner_image_b64, pet_image_b64, background_image_b64, output_type, concept, status, credits_used)
          VALUES (?, ?, ?, ?, ?, 'image', ?, 'pending', ?)`
       )
-      .bind(jobId, (user as any).id, ownerImageKey, petImageKey, backgroundImageKey, conceptId, GENERATION_CREDIT_COST)
+      .bind(jobId, (user as any).id, ownerImageKey, petImageKey, backgroundImageKey, conceptId, creditsCost)
       .run()
 
     const prompt = buildPrompt(conceptId, hasOwnerImage, hasBackgroundImage)
@@ -340,7 +350,7 @@ generation.post('/start', async (c) => {
     const thinkingLevel = hasBackgroundImage ? 'high' : 'default'
 
     c.executionCtx.waitUntil(
-      startAtlasJob(db, c.env.ATLAS_API_KEY, jobId, (user as any).id, prompt, images, thinkingLevel)
+      startAtlasJob(db, c.env.ATLAS_API_KEY, jobId, (user as any).id, prompt, images, thinkingLevel, creditsCost)
     )
 
     return c.json({ jobId, status: 'pending' }, 202)
@@ -362,7 +372,7 @@ generation.get('/status/:jobId', async (c) => {
   const jobId = c.req.param('jobId')
   let job: any = await db
     .prepare(
-      'SELECT id, user_id, status, result_url, error_message, concept, atlas_job_id, created_at FROM generation_logs WHERE id = ? AND user_id = ?'
+      'SELECT id, user_id, status, result_url, error_message, concept, atlas_job_id, created_at, credits_used FROM generation_logs WHERE id = ? AND user_id = ?'
     )
     .bind(jobId, (user as any).id)
     .first()

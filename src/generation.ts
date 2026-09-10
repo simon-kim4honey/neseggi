@@ -187,6 +187,10 @@ async function startAtlasJob(
   thinkingLevel: string
 ) {
   try {
+    // 즉시 마커 기록 — waitUntil로 넘긴 함수가 실제로 실행되기 시작했는지
+    // (vs. 조용히 실행 자체가 안 되는지) D1만 보고도 구분할 수 있게 함
+    await updateJob(db, jobId, { status: 'processing', error_message: 'debug: startAtlasJob 진입함' })
+
     const startRes = await fetch(`${ATLAS_API_BASE}/api/v1/model/generateImage`, {
       method: 'POST',
       headers: atlasHeaders(apiKey),

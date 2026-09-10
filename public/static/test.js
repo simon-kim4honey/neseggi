@@ -6,6 +6,8 @@
 
   const state = {
     petId: localStorage.getItem(PET_ID_KEY) || null,
+    petName: null,
+    petAvatarUrl: localStorage.getItem(RESULT_URL_KEY) || null,
     ownerTitle: null,
     petPhoto: null,
     ownerPhoto: null,
@@ -154,6 +156,7 @@
       return
     }
     state.petId = data.pet.id
+    state.petName = name
     localStorage.setItem(PET_ID_KEY, state.petId)
     showStep('step-title')
   })
@@ -291,22 +294,62 @@
     chatHeroImage.src = attempt === 0 ? url : bust
   }
 
+  // 카카오톡처럼 반려동물 메시지는 위에 프로필 사진+이름을 붙여서 보여준다
   function appendMessage(role, content) {
-    const div = document.createElement('div')
     const isPet = role === 'pet'
-    div.className = isPet ? 'text-left' : 'text-right'
+
+    if (!isPet) {
+      const div = document.createElement('div')
+      div.className = 'text-right'
+      const bubble = document.createElement('span')
+      bubble.className = 'bubble-user inline-block max-w-[80%]'
+      bubble.textContent = content
+      div.appendChild(bubble)
+      chatMessagesEl.appendChild(div)
+      chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight
+      return
+    }
+
+    const row = document.createElement('div')
+    row.className = 'flex items-start gap-2'
+
+    const avatar = document.createElement('img')
+    avatar.className = 'w-8 h-8 rounded-full object-cover border flex-shrink-0'
+    avatar.src = state.petAvatarUrl || ''
+    if (!state.petAvatarUrl) avatar.classList.add('invisible')
+    row.appendChild(avatar)
+
+    const col = document.createElement('div')
+    const nameEl = document.createElement('div')
+    nameEl.className = 'text-xs text-gray-500 mb-1'
+    nameEl.textContent = state.petName || '반려동물'
+    col.appendChild(nameEl)
+
     const bubble = document.createElement('span')
-    bubble.className = (isPet ? 'bubble-pet' : 'bubble-user') + ' inline-block max-w-[80%]'
+    bubble.className = 'bubble-pet inline-block max-w-[80%]'
     bubble.textContent = content
-    div.appendChild(bubble)
-    chatMessagesEl.appendChild(div)
+    col.appendChild(bubble)
+
+    row.appendChild(col)
+    chatMessagesEl.appendChild(row)
     chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight
   }
 
   async function enterChat(resultUrl) {
     if (resultUrl) {
       localStorage.setItem(RESULT_URL_KEY, resultUrl)
+      state.petAvatarUrl = resultUrl
       setHeroImage(resultUrl)
+      // 방금 생성된 이미지를 반려동물 프로필 대표사진으로도 저장
+      api('/api/chat/pets', { method: 'POST', body: JSON.stringify({ petId: state.petId, avatarUrl: resultUrl }) })
+    }
+    if (!state.petName || !state.petAvatarUrl) {
+      const { ok, data } = await api('/api/chat/pets')
+      const pet = ok ? (data.pets || []).find((p) => p.id === state.petId) : null
+      if (pet) {
+        state.petName = state.petName || pet.name
+        state.petAvatarUrl = state.petAvatarUrl || pet.avatar_url
+      }
     }
     showStep('step-chat')
     chatMessagesEl.innerHTML = ''

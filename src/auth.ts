@@ -3,6 +3,10 @@ import { Hono } from 'hono'
 type Bindings = {
   NESEGGI_DB: D1Database
   NESEGGI_KV: KVNamespace
+  KAKAO_CLIENT_ID: string
+  KAKAO_CLIENT_SECRET: string
+  GOOGLE_CLIENT_ID: string
+  GOOGLE_CLIENT_SECRET: string
 }
 
 const auth = new Hono<{ Bindings: Bindings }>()
@@ -117,9 +121,278 @@ auth.get('/me', async (c) => {
   return c.json({ user: publicUser(user) })
 })
 
-// TODO(neseggi): 카카오/구글 OAuth 콜백 — 각 provider 개발자센터에서 앱 등록 후 client id/secret 확정되면 구현
-auth.get('/oauth/:provider/callback', async (c) => {
-  return c.json({ error: 'not_implemented' }, 501)
+// ── origin 헬퍼: Host 헤더 기반으로 추출 (Cloudflare Workers 호환)
+function getOrigin(c: any): string {
+  const host = c.req.header('host') || c.req.header('x-forwarded-host') || ''
+  const proto = host.startsWith('localhost') ? 'http' : 'https'
+  return `${proto}://${host}`
+}
+
+// lookbook-ai(EZlook)와 동일한 카카오/구글 OAuth 앱을 재사용한다 — 로그인 입구를
+// 통일하기 위해 client id/secret은 EZlook과 같은 값을 쓰고, 카카오/구글 콘솔의
+// 허용 Redirect URI 목록에 이 서비스의 콜백 주소만 추가로 등록한다.
+// 엔드포인트 경로(/api/auth/kakao(/callback), /api/auth/google(/callback))도
+// lookbook-ai와 동일하게 맞춰서 두 서비스의 프런트엔드 로그인 연동 코드를 그대로
+// 재사용할 수 있게 한다.
+
+function oauthPopupSuccessHtml(provider: 'kakao' | 'google', token: string, user: any, isNewUser: boolean) {
+  const payload = JSON.stringify({ type: 'oauth_success', provider, token, user, isNewUser })
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head><meta charset="UTF-8"><title>로그인 성공</title></head>
+<body>
+<p style="font-family:sans-serif;text-align:center;padding:40px;color:#333;">✅ 로그인 성공! 잠시 후 창이 닫힙니다...</p>
+<script>
+(function() {
+  var payload = ${payload};
+  function tryClose() { try { window.close(); } catch(e) {} }
+  function sendMsg() {
+    try {
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage(payload, '*');
+        setTimeout(tryClose, 800);
+      } else {
+        try { localStorage.setItem('oauth_result', JSON.stringify(payload)); } catch(e) {}
+        setTimeout(tryClose, 500);
+      }
+    } catch(e) {
+      setTimeout(tryClose, 500);
+    }
+  }
+  if (document.readyState === 'complete') { sendMsg(); }
+  else { window.addEventListener('load', sendMsg); }
+})();
+</script>
+</body></html>`
+}
+
+function oauthRedirectSuccessHtml(provider: 'kakao' | 'google', token: string, user: any, isNewUser: boolean) {
+  const payload = JSON.stringify({ type: 'oauth_success', provider, token, user, isNewUser })
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head><meta charset="UTF-8"><title>로그인 성공</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body>
+<p style="font-family:sans-serif;text-align:center;padding:40px;color:#333;">✅ 로그인 성공! 잠시 이동합니다...</p>
+<script>
+(function(){
+  var payload = ${payload};
+  try { localStorage.setItem('oauth_result', JSON.stringify(payload)); } catch(e) {}
+  var pending = {};
+  try { pending = JSON.parse(localStorage.getItem('oauth_redirect_pending') || '{}'); } catch(e) {}
+  var dest = (pending.returnPath && pending.returnPath !== '/') ? pending.returnPath : '/';
+  window.location.replace(dest);
+})();
+</script>
+</body></html>`
+}
+
+function oauthErrorResponse(c: any, provider: 'kakao' | 'google', mode: string, msg: string) {
+  if (mode === 'redirect') return c.redirect(`/?oauth_error=${encodeURIComponent(msg)}`)
+  return c.html(
+    `<script>window.opener?.postMessage({type:'oauth_error',provider:'${provider}',error:'${msg}'},'*');window.close();</script>`
+  )
+}
+
+// ────────────────────────────────────────────────────
+// GET /api/auth/kakao — 카카오 OAuth 시작
+// ────────────────────────────────────────────────────
+auth.get('/kakao', (c) => {
+  const origin = getOrigin(c)
+  const mode = c.req.query('mode') || 'popup' // popup | redirect
+  const redirectUri = `${origin}/api/auth/kakao/callback`
+  const clientId = c.env.KAKAO_CLIENT_ID || ''
+  if (!clientId) {
+    if (mode === 'redirect') return c.redirect(`/?oauth_error=kakao_no_key`)
+    return c.html(`<script>window.opener?.postMessage({type:'oauth_error',provider:'kakao',error:'카카오 앱 키가 설정되지 않았습니다.'},'*');window.close();</script>`)
+  }
+  const url = `https://kauth.kakao.com/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&state=${mode}`
+  return c.redirect(url)
+})
+
+// ────────────────────────────────────────────────────
+// GET /api/auth/kakao/callback — 카카오 OAuth 콜백
+// ────────────────────────────────────────────────────
+auth.get('/kakao/callback', async (c) => {
+  const db = c.env.NESEGGI_DB
+  const origin = getOrigin(c)
+  const code = c.req.query('code')
+  const error = c.req.query('error')
+  const mode = c.req.query('state') || 'popup'
+
+  if (error || !code) return oauthErrorResponse(c, 'kakao', mode, error || 'cancelled')
+
+  try {
+    const redirectUri = `${origin}/api/auth/kakao/callback`
+    const tokenRes = await fetch('https://kauth.kakao.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        client_id: c.env.KAKAO_CLIENT_ID || '',
+        client_secret: c.env.KAKAO_CLIENT_SECRET || '',
+        redirect_uri: redirectUri,
+      }),
+    })
+    const tokenData: any = await tokenRes.json()
+    if (!tokenData.access_token) throw new Error('카카오 토큰 발급 실패')
+
+    const profileRes = await fetch('https://kapi.kakao.com/v2/user/me', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    })
+    const profile: any = await profileRes.json()
+    const providerId = String(profile.id)
+    const kakaoEmail = profile.kakao_account?.email || `kakao_${providerId}@kakao.local`
+    const kakaoName = profile.kakao_account?.profile?.nickname || '카카오 사용자'
+    const kakaoAvatar = profile.kakao_account?.profile?.profile_image_url || null
+
+    let isNewUser = false
+    let user: any = await db.prepare(`SELECT * FROM users WHERE provider = 'kakao' AND provider_id = ?`).bind(providerId).first()
+    if (!user) {
+      user = await db.prepare(`SELECT * FROM users WHERE email = ?`).bind(kakaoEmail).first()
+      if (user) {
+        await db.prepare(`UPDATE users SET provider_id = ?, avatar_url = ? WHERE id = ?`).bind(providerId, kakaoAvatar, user.id).run()
+      } else {
+        const id = newId('u')
+        await db
+          .prepare(
+            `INSERT INTO users (id, email, name, provider, provider_id, avatar_url, status, credits, role)
+             VALUES (?, ?, ?, 'kakao', ?, ?, 'active', ?, 'user')`
+          )
+          .bind(id, kakaoEmail, kakaoName, providerId, kakaoAvatar, SIGNUP_BONUS_CREDITS)
+          .run()
+        await db
+          .prepare(
+            `INSERT INTO credit_logs (user_id, type, amount, balance, reason, ref_id)
+             VALUES (?, 'signup', ?, ?, 'signup_bonus', ?)`
+          )
+          .bind(id, SIGNUP_BONUS_CREDITS, SIGNUP_BONUS_CREDITS, id)
+          .run()
+        user = await db.prepare(`SELECT * FROM users WHERE id = ?`).bind(id).first()
+        isNewUser = true
+      }
+    }
+    if (!user || user.status !== 'active') throw new Error('계정이 정지 상태입니다.')
+
+    await db.prepare(`UPDATE users SET last_login_at = datetime('now') WHERE id = ?`).bind(user.id).run()
+    const { token } = await createSession(db, user.id)
+    const publicUserData = publicUser(user)
+
+    return c.html(
+      mode === 'redirect'
+        ? oauthRedirectSuccessHtml('kakao', token, publicUserData, isNewUser)
+        : oauthPopupSuccessHtml('kakao', token, publicUserData, isNewUser)
+    )
+  } catch (err: any) {
+    console.error('kakao callback error:', err)
+    return oauthErrorResponse(c, 'kakao', mode, err.message || '로그인 오류')
+  }
+})
+
+// ────────────────────────────────────────────────────
+// GET /api/auth/google — 구글 OAuth 시작
+// ────────────────────────────────────────────────────
+auth.get('/google', (c) => {
+  const origin = getOrigin(c)
+  const mode = c.req.query('mode') || 'popup'
+  const redirectUri = `${origin}/api/auth/google/callback`
+  const clientId = c.env.GOOGLE_CLIENT_ID || ''
+  if (!clientId) {
+    if (mode === 'redirect') return c.redirect(`/?oauth_error=google_no_key`)
+    return c.html(`<script>window.opener?.postMessage({type:'oauth_error',provider:'google',error:'구글 클라이언트 ID가 설정되지 않았습니다.'},'*');window.close();</script>`)
+  }
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: 'openid email profile',
+    access_type: 'offline',
+    prompt: 'select_account',
+    state: mode,
+  })
+  return c.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`)
+})
+
+// ────────────────────────────────────────────────────
+// GET /api/auth/google/callback — 구글 OAuth 콜백
+// ────────────────────────────────────────────────────
+auth.get('/google/callback', async (c) => {
+  const db = c.env.NESEGGI_DB
+  const origin = getOrigin(c)
+  const code = c.req.query('code')
+  const error = c.req.query('error')
+  const mode = c.req.query('state') || 'popup'
+
+  if (error || !code) return oauthErrorResponse(c, 'google', mode, error || 'cancelled')
+
+  try {
+    const redirectUri = `${origin}/api/auth/google/callback`
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        client_id: c.env.GOOGLE_CLIENT_ID || '',
+        client_secret: c.env.GOOGLE_CLIENT_SECRET || '',
+        redirect_uri: redirectUri,
+      }),
+    })
+    const tokenData: any = await tokenRes.json()
+    if (!tokenData.access_token) throw new Error('구글 토큰 발급 실패')
+
+    const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    })
+    const profile: any = await profileRes.json()
+    const providerId = profile.id
+    const googleEmail = profile.email
+    const googleName = profile.name || '구글 사용자'
+    const googleAvatar = profile.picture || null
+
+    let isNewUser = false
+    let user: any = await db.prepare(`SELECT * FROM users WHERE provider = 'google' AND provider_id = ?`).bind(providerId).first()
+    if (!user) {
+      user = await db.prepare(`SELECT * FROM users WHERE email = ?`).bind(googleEmail).first()
+      if (user) {
+        await db.prepare(`UPDATE users SET provider_id = ?, avatar_url = ? WHERE id = ?`).bind(providerId, googleAvatar, user.id).run()
+      } else {
+        const id = newId('u')
+        await db
+          .prepare(
+            `INSERT INTO users (id, email, name, provider, provider_id, avatar_url, status, credits, role)
+             VALUES (?, ?, ?, 'google', ?, ?, 'active', ?, 'user')`
+          )
+          .bind(id, googleEmail, googleName, providerId, googleAvatar, SIGNUP_BONUS_CREDITS)
+          .run()
+        await db
+          .prepare(
+            `INSERT INTO credit_logs (user_id, type, amount, balance, reason, ref_id)
+             VALUES (?, 'signup', ?, ?, 'signup_bonus', ?)`
+          )
+          .bind(id, SIGNUP_BONUS_CREDITS, SIGNUP_BONUS_CREDITS, id)
+          .run()
+        user = await db.prepare(`SELECT * FROM users WHERE id = ?`).bind(id).first()
+        isNewUser = true
+      }
+    }
+    if (!user || user.status !== 'active') throw new Error('계정이 정지 상태입니다.')
+
+    await db.prepare(`UPDATE users SET last_login_at = datetime('now') WHERE id = ?`).bind(user.id).run()
+    const { token } = await createSession(db, user.id)
+    const publicUserData = publicUser(user)
+
+    return c.html(
+      mode === 'redirect'
+        ? oauthRedirectSuccessHtml('google', token, publicUserData, isNewUser)
+        : oauthPopupSuccessHtml('google', token, publicUserData, isNewUser)
+    )
+  } catch (err: any) {
+    console.error('google callback error:', err)
+    return oauthErrorResponse(c, 'google', mode, err.message || '로그인 오류')
+  }
 })
 
 auth.post('/logout', async (c) => {

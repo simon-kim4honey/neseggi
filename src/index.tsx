@@ -10,6 +10,10 @@ type Bindings = {
   NESEGGI_KV: KVNamespace
   TOSS_SECRET_KEY: string
   ADMIN_PASSWORD: string
+  KAKAO_CLIENT_ID: string
+  KAKAO_CLIENT_SECRET: string
+  GOOGLE_CLIENT_ID: string
+  GOOGLE_CLIENT_SECRET: string
 }
 
 const app = new Hono<{ Bindings: Bindings }>()

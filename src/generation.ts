@@ -172,54 +172,43 @@ function extractOutputUrl(pollRes: any): string | null {
   return typeof rawOut === 'string' && rawOut.startsWith('http') ? rawOut : null
 }
 
-// AtlasCloud 생성 요청 1회 전송 (waitUntil로 백그라운드 실행). 완료까지 기다리지
-// 않고 job id만 받아서 저장한다 — 실제 완료 확인은 클라이언트가 /status를 호출할
-// 때마다 syncJobStatus()가 그때그때 짧게 조회한다. (예전엔 이 함수 안에서 최대
-// 2분짜리 폴링 루프를 돌렸는데, Cloudflare waitUntil의 실행시간 제한에 걸려
-// 루프 중간에 조용히 종료되고 job이 영원히 'processing'에 멈추는 문제가 실제로
-// 발생함— 2026-09-10 첫 실사진 테스트에서 확인. 짧은 요청 여러 번으로 바꿔서 해결.)
+// AtlasCloud "생성 시작" 요청 1회 전송 — /start 핸들러에서 직접 await한다
+// (waitUntil 백그라운드 아님). 전체 이미지 생성 완료까지 기다리는 게 아니라
+// job이 정상 접수됐다는 응답만 기다리는 거라 보통 1초 안팎으로 끝난다.
+//
+// ⚠️ 예전엔 이 호출을 waitUntil로 백그라운드에 던졌는데, 실사진(수 MB) 테스트에서
+// 매번 "함수는 시작됨(디버그 마커까지 기록됨) → AtlasCloud fetch 도중 실행이
+// 조용히 끊김 → atlas_job_id 영영 null"인 게 재현됨 (2026-09-10). 이 Cloudflare
+// Pages 환경에서 waitUntil이 fetch 완료까지 실행을 보장해주지 않는 것으로
+// 판단 — 그래서 "시작" 요청만큼은 요청 처리 안에서 직접 기다리도록 바꿈.
+// 실제 완료 확인(폴링)은 여전히 클라이언트가 /status를 호출할 때마다
+// syncJobStatus()가 그때그때 짧게 조회한다.
 async function startAtlasJob(
-  db: D1Database,
   apiKey: string,
-  jobId: string,
-  userId: string,
   prompt: string,
   images: string[],
-  thinkingLevel: string,
-  creditsCost: number
-) {
-  try {
-    // 즉시 마커 기록 — waitUntil로 넘긴 함수가 실제로 실행되기 시작했는지
-    // (vs. 조용히 실행 자체가 안 되는지) D1만 보고도 구분할 수 있게 함
-    await updateJob(db, jobId, { status: 'processing', error_message: 'debug: startAtlasJob 진입함' })
-
-    const startRes = await fetch(`${ATLAS_API_BASE}/api/v1/model/generateImage`, {
-      method: 'POST',
-      headers: atlasHeaders(apiKey),
-      body: JSON.stringify({
-        model: 'google/nano-banana-2/edit',
-        prompt,
-        aspect_ratio: '1:1',
-        resolution: '2k',
-        thinking_level: thinkingLevel,
-        output_format: 'jpeg',
-        images,
-      }),
-    })
-    const startData: any = await startRes.json()
-    const atlasJobId = startData?.data?.id
-    if (startData?.code !== 200 || !atlasJobId) {
-      console.error('generation start failed:', jobId, startData)
-      await updateJob(db, jobId, { status: 'failed', error_message: 'AI 생성 요청 실패' })
-      await refundCredits(db, userId, jobId, creditsCost)
-      return
-    }
-    await updateJob(db, jobId, { status: 'processing', atlas_job_id: atlasJobId })
-  } catch (err: any) {
-    console.error('generation start error:', jobId, err)
-    await updateJob(db, jobId, { status: 'failed', error_message: err?.message || '서버 오류' })
-    await refundCredits(db, userId, jobId, creditsCost)
+  thinkingLevel: string
+): Promise<{ ok: true; atlasJobId: string } | { ok: false; message: string }> {
+  const startRes = await fetch(`${ATLAS_API_BASE}/api/v1/model/generateImage`, {
+    method: 'POST',
+    headers: atlasHeaders(apiKey),
+    body: JSON.stringify({
+      model: 'google/nano-banana-2/edit',
+      prompt,
+      aspect_ratio: '1:1',
+      resolution: '2k',
+      thinking_level: thinkingLevel,
+      output_format: 'jpeg',
+      images,
+    }),
+  })
+  const startData: any = await startRes.json()
+  const atlasJobId = startData?.data?.id
+  if (startData?.code !== 200 || !atlasJobId) {
+    console.error('generation start failed:', startData)
+    return { ok: false, message: 'AI 생성 요청 실패' }
   }
+  return { ok: true, atlasJobId }
 }
 
 // GET /status 호출마다 한 번씩 AtlasCloud를 짧게 조회해서 상태를 동기화한다.
@@ -349,11 +338,15 @@ generation.post('/start', async (c) => {
     // 인물 생김새가 깨지는 문제 확인).
     const thinkingLevel = hasBackgroundImage ? 'high' : 'default'
 
-    c.executionCtx.waitUntil(
-      startAtlasJob(db, c.env.ATLAS_API_KEY, jobId, (user as any).id, prompt, images, thinkingLevel, creditsCost)
-    )
+    const started = await startAtlasJob(c.env.ATLAS_API_KEY, prompt, images, thinkingLevel)
+    if (!started.ok) {
+      await updateJob(db, jobId, { status: 'failed', error_message: started.message })
+      await refundCredits(db, (user as any).id, jobId, creditsCost)
+      return c.json({ error: started.message, code: 'ATLAS_START_FAILED' }, 502)
+    }
+    await updateJob(db, jobId, { status: 'processing', atlas_job_id: started.atlasJobId })
 
-    return c.json({ jobId, status: 'pending' }, 202)
+    return c.json({ jobId, status: 'processing' }, 202)
   } catch (err: any) {
     console.error('generate/start error:', err)
     return c.json({ error: '서버 오류가 발생했습니다.', code: 'INTERNAL_ERROR', message: err?.message }, 500)

@@ -521,8 +521,10 @@
   function makeAvatarEl() {
     if (!state.petAvatarUrl || !state.petId) return makeAvatarFallbackEl()
     const avatar = document.createElement('img')
-    avatar.className = 'w-8 h-8 rounded-full object-cover border flex-shrink-0'
-    setImageWithRetry(avatar, avatarProxyUrl(state.petId), 0, () => avatar.replaceWith(makeAvatarFallbackEl()))
+    avatar.className = 'w-8 h-8 rounded-full object-cover border flex-shrink-0 cursor-pointer'
+    const proxiedUrl = avatarProxyUrl(state.petId)
+    avatar.addEventListener('click', () => openLightbox(proxiedUrl))
+    setImageWithRetry(avatar, proxiedUrl, 0, () => avatar.replaceWith(makeAvatarFallbackEl()))
     return avatar
   }
 

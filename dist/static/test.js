@@ -70,13 +70,16 @@
 
   // Claude API/AtlasCloud 둘 다 image/avif, image/heic 같은 포맷은 지원하지
   // 않아서 서버가 거절한다 — 캔버스에 그려서 JPEG로 변환한 뒤 업로드한다.
-  // (png/jpeg/webp는 이미 지원되는 포맷이라 변환 없이 그대로 사용)
+  // 포맷과 무관하게 항상 이 경로를 거치는 이유는 리사이즈 때문 — 휴대폰
+  // 사진은 보통 3000px가 넘는데 원본 그대로 Claude에 보내면 비전 토큰이
+  // 크게 늘어 비용이 커진다(2026-09-11 확인, classify-species 같은 단순
+  // 분류 호출이 오히려 채팅 응답보다 비쌌던 원인). 긴 변 기준
+  // MAX_IMAGE_DIMENSION으로 축소해서 보내면 화질 체감 차이는 거의 없이
+  // 토큰을 크게 줄일 수 있다 — 반려동물/보호자/배경 사진(합성용)과 채팅
+  // 첨부 사진 전부 이 함수 하나를 거치므로 한 곳만 고치면 전체에 적용된다.
+  const MAX_IMAGE_DIMENSION = 1024
   async function normalizeImageFile(file) {
     if (!file) return null
-    const type = (file.type || '').toLowerCase()
-    if (type === 'image/png' || type === 'image/jpeg' || type === 'image/jpg' || type === 'image/webp') {
-      return fileToDataUrl(file)
-    }
     const objectUrl = URL.createObjectURL(file)
     try {
       const img = await new Promise((resolve, reject) => {
@@ -85,15 +88,16 @@
         el.onerror = reject
         el.src = objectUrl
       })
+      const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(img.naturalWidth, img.naturalHeight))
       const canvas = document.createElement('canvas')
-      canvas.width = img.naturalWidth
-      canvas.height = img.naturalHeight
-      canvas.getContext('2d').drawImage(img, 0, 0)
-      return canvas.toDataURL('image/jpeg', 0.92)
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale))
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+      return canvas.toDataURL('image/jpeg', 0.85)
     } catch (err) {
-      // 브라우저가 이 포맷을 디코딩하지 못하면 원본을 그대로 시도 — 서버가
-      // 형식 오류로 거절하면 그때 사용자에게 알려진다.
-      console.error('image format conversion failed:', err)
+      // 브라우저가 이 포맷을 디코딩(또는 리사이즈)하지 못하면 원본을 그대로
+      // 시도 — 서버가 형식 오류로 거절하면 그때 사용자에게 알려진다.
+      console.error('image resize failed:', err)
       return fileToDataUrl(file)
     } finally {
       URL.revokeObjectURL(objectUrl)

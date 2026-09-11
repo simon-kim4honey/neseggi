@@ -13,6 +13,12 @@ type Bindings = {
 const chat = new Hono<{ Bindings: Bindings }>()
 
 const CHAT_MODEL = 'claude-opus-5'
+// 종/품종 자동분류(classify-species)는 반려동물 페르소나/감성 품질과 무관한
+// 단순 이미지 분류라 굳이 Opus를 쓸 필요가 없다 — Haiku가 이 수준의 작업엔
+// 충분하고 입력 단가가 1/5라 비용을 크게 아낄 수 있다(2026-09-11 비용
+// 절감 조치). 채팅 응답/인사/캡션 등 페르소나가 드러나는 호출은 계속
+// CHAT_MODEL(Opus 5)을 쓴다 — 절대 여기 맞춰 낮추지 말 것.
+const UTILITY_MODEL = 'claude-haiku-4-5'
 const MAX_HISTORY_MESSAGES = 30 // 컨텍스트로 넘길 최근 대화 수 (사용자+반려동물 합산)
 const MAX_PET_PHOTOS = 10
 
@@ -114,6 +120,16 @@ function buildPersonaSystemPrompt(pet: {
     .join(' ')
 }
 
+// 페르소나 시스템 프롬프트는 같은 반려동물이면 호출마다(인사/캡션/채팅
+// 응답) 토씨 하나 안 틀리고 동일하다 — cache_control로 캐싱하면 같은
+// 반려동물과의 연속 호출에서 이 프롬프트 분량만큼은 최대 90%까지 싸진다
+// (2026-09-11 비용 절감 조치). 5분 TTL(기본값)이라 짧은 시간 안에 이어지는
+// 호출에서만 효과가 있고, 하루 한 번뿐인 "오늘의 추억사진" 같은 호출은
+// 어차피 캐시가 만료돼 있어 이득이 없지만 손해도 없다.
+function cachedSystemPrompt(persona: string): Anthropic.TextBlockParam[] {
+  return [{ type: 'text', text: persona, cache_control: { type: 'ephemeral' } }]
+}
+
 // 페르소나 시스템 프롬프트 + 짧은 지시문으로 반려동물의 한 마디를 생성한다.
 // 인사말(/greeting)과 사진 캡션(/photo-caption, "오늘의 추억사진")이
 // 공유하는 핵심 로직 — 모델 호출부만 한 곳에 모아 중복을 없앤다.
@@ -127,7 +143,7 @@ async function generatePersonaLine(
   const response = await anthropic.messages.create({
     model: CHAT_MODEL,
     max_tokens: maxTokens,
-    system: persona,
+    system: cachedSystemPrompt(persona),
     messages: [{ role: 'user', content: instruction }],
   })
   await logClaudeUsage(logCtx.db, {
@@ -163,7 +179,7 @@ chat.post('/classify-species', async (c) => {
 
     const anthropic = new Anthropic({ apiKey: c.env.ANTHROPIC_API_KEY })
     const response = await anthropic.messages.create({
-      model: CHAT_MODEL,
+      model: UTILITY_MODEL,
       max_tokens: 32,
       messages: [
         {
@@ -183,7 +199,7 @@ chat.post('/classify-species', async (c) => {
       userId: (user as any).id,
       petId: null,
       purpose: 'classify_species',
-      model: CHAT_MODEL,
+      model: UTILITY_MODEL,
       usage: response.usage,
     })
 
@@ -540,7 +556,7 @@ chat.post('/pets/:petId/greeting', async (c) => {
     const response = await anthropic.messages.create({
       model: CHAT_MODEL,
       max_tokens: 1024,
-      system: persona,
+      system: cachedSystemPrompt(persona),
       messages: [
         {
           role: 'user',
@@ -829,12 +845,14 @@ chat.post('/pets/:petId/messages', async (c) => {
     const response = await anthropic.messages.create({
       model: CHAT_MODEL,
       max_tokens: 1024,
-      system: buildPersonaSystemPrompt({
-        name: pet.name,
-        species: pet.species,
-        personality: pet.personality,
-        ownerTitle: pet.owner_title,
-      }),
+      system: cachedSystemPrompt(
+        buildPersonaSystemPrompt({
+          name: pet.name,
+          species: pet.species,
+          personality: pet.personality,
+          ownerTitle: pet.owner_title,
+        })
+      ),
       messages: anthropicMessages,
     })
 

@@ -194,6 +194,32 @@ Claude API가 유료로 과금되고 있어서, `chat.ts`가 `anthropic.messages
 단가표도 같이 업데이트할 것(현재 `CHAT_MODEL`은 항상 `claude-opus-5`라
 사실상 한 가지 단가만 쓰임).
 
+### 비용 절감 조치 (2026-09-11)
+
+`/admin` "Claude API 사용량" 탭에서 입력 토큰이 출력 토큰의 수십 배로 비쌌던
+걸 확인하고 적용한 조치 3가지 — 전부 채팅 응답 자체의 품질(페르소나
+말투)에는 손대지 않음:
+
+- **이미지 리사이즈** (`public/static/test.js`의 `normalizeImageFile`) —
+  포맷 변환만 하고 원본 해상도 그대로 보내던 걸, 항상 캔버스를 거쳐 긴 변
+  기준 `MAX_IMAGE_DIMENSION`(1024px)으로 축소해서 전송하도록 바꿈. 반려동물/
+  보호자/배경 사진(합성용)과 채팅 첨부 사진이 전부 이 함수 하나를 거치므로
+  한 곳만 고쳐서 전체에 적용됨. 휴대폰 사진은 보통 3000px+라 비전 토큰이
+  크게 줄어듦.
+- **페르소나 시스템 프롬프트 캐싱** (`chat.ts`의 `cachedSystemPrompt()`) —
+  `generatePersonaLine`(photo-caption/daily-memory-caption), `greeting`,
+  메인 채팅 응답 3곳 모두 시스템 프롬프트에 `cache_control: {type:
+  'ephemeral'}`을 붙임. 같은 반려동물이면 호출마다 토씨 하나 안 틀리고
+  동일한 프롬프트라 캐시 적중 시 그 분량은 최대 90%까지 싸짐. 기본 TTL이
+  5분이라 짧은 시간 안에 이어지는 호출(같은 채팅 세션 안에서 여러 번 답장)
+  에서만 효과가 있음 — 하루 한 번뿐인 daily-memory 같은 호출은 이득이
+  없지만 손해도 없음.
+- **`classify-species`를 `claude-haiku-4-5`로 전환** (`chat.ts`의
+  `UTILITY_MODEL`) — 반려동물 페르소나와 무관한 단순 사진 분류라 Opus가
+  필요 없음, 입력 단가가 1/5. **채팅 응답/인사/캡션처럼 페르소나가 드러나는
+  호출은 절대 여기 맞춰 낮추지 말 것** — 이 서비스의 정서적 핵심이라
+  품질 저하 위험이 비용 절감보다 큼.
+
 ## ⚠️ `c.executionCtx.waitUntil`은 이 Cloudflare Pages 환경에서 신뢰할 수 없다
 
 2026-09-10에 실제로 재현/디버깅한 내용: `generation.ts`에서 AtlasCloud

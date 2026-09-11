@@ -311,15 +311,24 @@ AtlasCloud 쪽에 확인.
 
 - `ATLAS_API_KEY` — AtlasCloud 이미지 생성 (`https://api.atlascloud.ai`) ✅ 등록됨
 - `ANTHROPIC_API_KEY` — 반려동물 채팅(Claude API) ✅ 등록됨
-- `KAKAO_CLIENT_ID` — EZlook(lookbook-ai)과 **동일 앱 재사용**(REST API 키).
-  EZlook 쪽 "카카오 로그인 클라이언트 시크릿" 기능이 꺼져있어서
-  `KAKAO_CLIENT_SECRET`은 필요 없음(보내도 카카오가 검증 안 함). 한 번
-  PATCH 부작용으로 유실됐다가(아래 교훈 참고) 2026-09-10에 사용자가 다시
-  알려준 값으로 재등록함. ✅ 등록됨
-- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — EZlook과 동일 Google Cloud
-  OAuth 클라이언트 재사용, neseggi 콜백 URL을 승인된 리디렉션 URI에 추가함.
-  `GOOGLE_CLIENT_ID`도 같은 이유로 유실됐다가 세션 로그에 남아있던 값으로
-  복구함(`502307677132-...apps.googleusercontent.com`). ✅ 등록됨
+- `KAKAO_CLIENT_ID` — EZlook(lookbook-ai)과 **동일 앱 재사용**(REST API 키,
+  `9a052881be2fbaa08db2a6b71762f781`). EZlook 쪽 "카카오 로그인 클라이언트
+  시크릿" 기능이 꺼져있어서 `KAKAO_CLIENT_SECRET`은 아예 등록 안 해도 됨
+  (코드가 `|| ''`로 처리하고, 카카오도 검증 안 함 — 등록 자체를 생략함).
+  2026-09-10, 2026-09-11 두 번 PATCH 부작용으로 유실 → 재등록(아래 교훈
+  참고) — **재발 방지로 plain_text 타입으로 등록**(원래 secret_text로
+  가려질 이유가 없는 값이라 — REST API 키는 OAuth 인가 URL에 그대로
+  노출되는 값이라 어차피 비밀이 아님). plain_text면 GET으로 값을 다시 읽을
+  수 있어서, 세 번째로 유실돼도 이 문서를 다시 읽을 필요 없이 API로 바로
+  확인 가능. ✅ 등록됨
+- `GOOGLE_CLIENT_ID` — EZlook과 동일 Google Cloud OAuth 클라이언트 재사용,
+  neseggi 콜백 URL을 승인된 리디렉션 URI에 추가함
+  (`502307677132-579f4klvup67cr4lh8j487e8u3pd6i93.apps.googleusercontent.com`).
+  OAuth 클라이언트 ID는 애초에 비밀이 아닌 값(인가 URL에 그대로 노출)이라
+  **plain_text로 등록** — 위 KAKAO_CLIENT_ID와 동일한 이유. 2026-09-10,
+  2026-09-11 두 번 유실 → 재등록. ✅ 등록됨
+- `GOOGLE_CLIENT_SECRET` — Google Cloud OAuth 클라이언트 시크릿, secret_text로
+  등록(이건 진짜 비밀값이라 노출되면 안 됨). ✅ 등록됨
 - `TOSS_CLIENT_KEY`, `TOSS_SECRET_KEY` — 테스트/샌드박스 키만 등록됨(실제
   가맹점 키 아님, 실서비스 전 교체 필요). `TOSS_API_BASE`도 같은 이유로
   유실됐다가 `https://api.tosspayments.com`으로 복구함. ✅ 등록됨
@@ -329,17 +338,25 @@ AtlasCloud 쪽에 확인.
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` — 해외 결제(선택), 미등록
 - `GA4_MEASUREMENT_ID` — `wrangler.jsonc`의 `vars`, 아직 placeholder
 
-**⚠️ 교훈 (2026-09-10, 같은 세션 안에서 세 번 재현됨)**: Preview
-`env_vars`를 PATCH할 때, 이번 PATCH에서 언급하지 않은 다른 키가 — 특히
-**바로 직전 PATCH에서 새로 추가된 plain_text 키**가 — 조용히 사라지는
-경우가 반복 확인됐다(`GOOGLE_CLIENT_ID`/`TOSS_API_BASE`가 등록 직후 다음
-PATCH 한 번에 같이 날아간 사례). 그러니 **PATCH 한 번마다 예외 없이** 그
-직후 전체 키 목록을 GET으로 다시 확인하고, 빠진 게 있으면 그 자리에서
+**⚠️ 교훈 (2026-09-10에 같은 세션 안에서 세 번, 2026-09-11에 또 한 번 —
+총 네 번째 재현됨)**: Preview `env_vars`를 PATCH할 때, 이번 PATCH에서
+언급하지 않은 다른 키가 — 특히 **바로 직전 PATCH에서 새로 추가된 키**가 —
+조용히 사라지는 경우가 반복 확인됐다(`GOOGLE_CLIENT_ID`/`TOSS_API_BASE`가
+등록 직후 다음 PATCH 한 번에 같이 날아간 사례, 2026-09-11엔
+`KAKAO_CLIENT_ID`/`KAKAO_CLIENT_SECRET`/`GOOGLE_CLIENT_ID`/`TOSS_API_BASE`
+4개가 한꺼번에 사라진 채 발견됨 — 카카오/구글 로그인 버튼을 눌러도 반응이
+없다는 사용자 리포트로 뒤늦게 발견). 그러니 **PATCH 한 번마다 예외 없이**
+그 직후 전체 키 목록을 GET으로 다시 확인하고, 빠진 게 있으면 그 자리에서
 바로 복구할 것 — "이전에 확인했으니 이번엔 괜찮겠지"라고 넘기지 말 것.
 `secret_text` 타입은 값 자체를 API로 다시 읽을 수 없으므로(GET 응답이
 항상 빈 문자열), 한 번 유실되면 세션 로그에 텍스트로 남아있지 않은 한
 복구 불가능하다 — 스크린샷으로만 전달된 값(예: 카카오 REST API 키)은
 그래서 실제로 한 번 복구 불가 상태까지 갔었다(이후 사용자가 재발급).
+**그래서 애초에 비밀이 아닌 값(OAuth 클라이언트 ID, API 베이스 URL 등)은
+plain_text로 등록해 둔다** — 2026-09-11부터 `KAKAO_CLIENT_ID`,
+`GOOGLE_CLIENT_ID`, `TOSS_API_BASE`가 plain_text이므로, 다음에 또 유실돼도
+이 문서 대신 GET으로 바로 복구 가능. 반대로 진짜 비밀값(API 키, 클라이언트
+시크릿, 비밀번호)은 계속 secret_text로 둘 것 — plain_text로 낮추지 말 것.
 그리고 **PATCH로 시크릿을 바꾼 뒤에는 최신 배포를 `/deployments/{id}/retry`로
 재배포해야 실제로 반영된다** — 안 그러면 이미 떠 있는 배포는 예전 값을
 계속 쓴다(위 "Cloudflare Pages는 env_vars를 즉시 반영하지 않음" 참고).
